@@ -17,6 +17,7 @@
     <name>Wijitify contributors</name>
   </developer>
   <releases>
+    <release version="0.2.1" date="2026-10-20"/>
     <release version="0.2.0" date="2026-10-20"/>
     <release version="0.1.0" date="2026-10-19"/>
   </releases>
