@@ -68,7 +68,8 @@ jobs:
           if git show-ref --verify --quiet refs/heads/gh-pages; then
             git archive gh-pages | tar -x -C site || true
           fi
-          mkdir -p site/repo
+          # git drops empty dirs that ostree requires (e.g. refs/remotes)
+          mkdir -p site/repo/{refs/heads,refs/remotes,refs/mirrors,tmp,state,extensions}
           touch site/.nojekyll
 
       - name: Build into OSTree repo
