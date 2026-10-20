@@ -20,7 +20,7 @@ V0 ships a downloadable `.flatpak` **bundle** for manual install. Continuous upd
 
 ```bash
 flatpak install --user ./wijitify-v0.1.0.flatpak
-flatpak run io.github.<user>.Wijitify
+flatpak run io.github.JordHV.Wijitify
 ```
 
 ## Update UX (post-V0)

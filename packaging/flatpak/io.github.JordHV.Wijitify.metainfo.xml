@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.wijitify.Wijitify</id>
+  <id>io.github.JordHV.Wijitify</id>
   <name>Wijitify</name>
   <summary>Modular Linux touchscreen dashboard</summary>
   <metadata_license>CC0-1.0</metadata_license>
@@ -11,9 +11,9 @@
       Zalender, the first module, shows family calendars from ICS feeds with offline caching.
     </p>
   </description>
-  <launchable type="desktop-id">io.github.wijitify.Wijitify.desktop</launchable>
-  <url type="homepage">https://github.com/wijitify/wijitify</url>
-  <developer id="io.github.wijitify">
+  <launchable type="desktop-id">io.github.JordHV.Wijitify.desktop</launchable>
+  <url type="homepage">https://github.com/JordHV/wijitify</url>
+  <developer id="io.github.JordHV">
     <name>Wijitify contributors</name>
   </developer>
   <releases>

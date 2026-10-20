@@ -48,8 +48,8 @@ jobs:
 
       - name: Build Flatpak bundle
         run: |
-          flatpak-builder --user --force-clean --repo=repo build-dir packaging/flatpak/io.github.wijitify.Wijitify.yml
-          flatpak build-bundle repo "wijitify-${GITHUB_REF_NAME}.flatpak" io.github.wijitify.Wijitify
+          flatpak-builder --user --force-clean --repo=repo build-dir packaging/flatpak/io.github.JordHV.Wijitify.yml
+          flatpak build-bundle repo "wijitify-${GITHUB_REF_NAME}.flatpak" io.github.JordHV.Wijitify
           sha256sum "wijitify-${GITHUB_REF_NAME}.flatpak" > "wijitify-${GITHUB_REF_NAME}.flatpak.sha256"
 
       - name: Extract changelog notes

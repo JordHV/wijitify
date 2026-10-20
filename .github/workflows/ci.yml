@@ -60,5 +60,5 @@ jobs:
 
       - name: Build Flatpak
         run: |
-          flatpak-builder --user --force-clean --repo=repo build-dir packaging/flatpak/io.github.wijitify.Wijitify.yml
-          flatpak build-bundle repo wijitify-ci.flatpak io.github.wijitify.Wijitify
+          flatpak-builder --user --force-clean --repo=repo build-dir packaging/flatpak/io.github.JordHV.Wijitify.yml
+          flatpak build-bundle repo wijitify-ci.flatpak io.github.JordHV.Wijitify

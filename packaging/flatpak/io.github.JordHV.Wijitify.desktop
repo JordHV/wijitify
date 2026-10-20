@@ -2,7 +2,7 @@
 Name=Wijitify
 Comment=Modular touchscreen home dashboard
 Exec=wijitify
-Icon=io.github.wijitify.Wijitify
+Icon=io.github.JordHV.Wijitify
 Terminal=false
 Type=Application
 Categories=Utility;Calendar;

@@ -59,4 +59,4 @@ Offline crate docs: `cargo doc --open`.
 
 ## App ID
 
-Flatpak / desktop id: `io.github.<github-user>.Wijitify` (set in packaging when the public repo exists).
+Flatpak / desktop id: `io.github.JordHV.Wijitify`. The XDG data/config path stays `Wijitify` (`ProjectDirs::from("io", "github", "Wijitify")`).

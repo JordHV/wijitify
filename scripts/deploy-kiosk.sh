@@ -12,7 +12,7 @@ fi
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo || true
 flatpak install -y --user "$BUNDLE"
 
-APP_ID="io.github.wijitify.Wijitify"
+APP_ID="io.github.JordHV.Wijitify"
 mkdir -p "$HOME/.config/autostart"
 cat > "$HOME/.config/autostart/wijitify.desktop" <<EOF
 [Desktop Entry]
