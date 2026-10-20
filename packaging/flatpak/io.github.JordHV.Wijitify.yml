@@ -27,6 +27,8 @@ modules:
       - cargo --offline build --release --locked
       - install -Dm755 target/release/wijitify /app/bin/wijitify
       - install -Dm644 packaging/flatpak/io.github.JordHV.Wijitify.desktop /app/share/applications/io.github.JordHV.Wijitify.desktop
+      - install -Dm644 packaging/flatpak/io.github.JordHV.Wijitify.svg /app/share/icons/hicolor/scalable/apps/io.github.JordHV.Wijitify.svg
+      - install -Dm644 packaging/flatpak/io.github.JordHV.Wijitify.svg /app/share/icons/hicolor/scalable/apps/io.github.JordHV.Wijitify.svg
       - install -Dm644 packaging/flatpak/io.github.JordHV.Wijitify.metainfo.xml /app/share/metainfo/io.github.JordHV.Wijitify.metainfo.xml
     sources:
       - cargo-sources.json
