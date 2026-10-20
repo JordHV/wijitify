@@ -1,0 +1,13 @@
+# Append to %USERPROFILE%\.ssh\config
+
+Host wijitify-vm
+  HostName 192.168.254.133
+  User surfacetest
+  IdentityFile ~/.ssh/id_ed25519
+  StrictHostKeyChecking accept-new
+
+# After Surface has openssh-server and your key:
+# Host surface
+#   HostName <surface-lan-ip>
+#   User <ubuntu-user>
+#   IdentityFile ~/.ssh/id_ed25519

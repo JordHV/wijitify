@@ -1,0 +1,34 @@
+# App ID uses the github org/user placeholder `wijitify`.
+# Update to io.github.<user>.Wijitify when the public repo owner is known.
+app-id: io.github.wijitify.Wijitify
+runtime: org.freedesktop.Platform
+runtime-version: "24.08"
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: wijitify
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=network
+  - --share=ipc
+  - --filesystem=xdg-config/wijitify:create
+  - --filesystem=xdg-cache/wijitify:create
+modules:
+  - name: wijitify
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/wijitify/cargo
+        RUST_BACKTRACE: "1"
+    build-commands:
+      - cargo --offline build --release --locked
+      - install -Dm755 target/release/wijitify /app/bin/wijitify
+      - install -Dm644 packaging/flatpak/io.github.wijitify.Wijitify.desktop /app/share/applications/io.github.wijitify.Wijitify.desktop
+      - install -Dm644 packaging/flatpak/io.github.wijitify.Wijitify.metainfo.xml /app/share/metainfo/io.github.wijitify.Wijitify.metainfo.xml
+    sources:
+      - cargo-sources.json
+      - type: dir
+        path: ../..

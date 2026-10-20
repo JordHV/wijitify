@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.wijitify.Wijitify</id>
+  <name>Wijitify</name>
+  <summary>Modular Linux touchscreen dashboard</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      Wijitify is an open-source full-screen touchscreen dashboard for Linux.
+      Zalender, the first module, shows family calendars from ICS feeds with offline caching.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.wijitify.Wijitify.desktop</launchable>
+  <url type="homepage">https://github.com/wijitify/wijitify</url>
+  <developer id="io.github.wijitify">
+    <name>Wijitify contributors</name>
+  </developer>
+  <releases>
+    <release version="0.1.0" date="2026-10-19"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig1-dev libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcursor-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-x11-dev libssl-dev pkg-config \
+            flatpak flatpak-builder
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CRATE=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          test "$TAG" = "$CRATE"
+
+      - name: Checks
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+          cargo build --release
+
+      - name: Flatpak remotes
+        run: |
+          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08 org.freedesktop.Sdk.Extension.rust-stable//24.08
+
+      - name: Build Flatpak bundle
+        run: |
+          flatpak-builder --user --force-clean --repo=repo build-dir packaging/flatpak/io.github.wijitify.Wijitify.yml
+          flatpak build-bundle repo "wijitify-${GITHUB_REF_NAME}.flatpak" io.github.wijitify.Wijitify
+          sha256sum "wijitify-${GITHUB_REF_NAME}.flatpak" > "wijitify-${GITHUB_REF_NAME}.flatpak.sha256"
+
+      - name: Extract changelog notes
+        id: notes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          lines = text.splitlines()
+          out = []
+          capture = False
+          for line in lines:
+              if line.startswith("## ["):
+                  if capture:
+                      break
+                  capture = True
+                  out.append(line)
+                  continue
+              if capture:
+                  out.append(line)
+          Path("release-notes.md").write_text("\n".join(out).strip() + "\n", encoding="utf-8")
+          PY
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            wijitify-${{ github.ref_name }}.flatpak
+            wijitify-${{ github.ref_name }}.flatpak.sha256

@@ -1,0 +1,16 @@
+---
+description: Wijitify core principles — always apply
+alwaysApply: true
+---
+
+# Wijitify principles (checklist)
+
+Full text: [docs/PRINCIPLES.md](docs/PRINCIPLES.md). Priority when they conflict: correctness → perceived latency → offline → speed → official docs. Simplicity implements all of them.
+
+1. **Simple** — Smallest code that works. No fluff, no dead code. Comments only for *why*. No `unwrap()` outside tests.
+2. **Perceived latency** — Touch feedback next frame. UI thread never blocks on I/O/network/parse. Instant navigation from memory; stale cache over blocking spinners.
+3. **Offline first** — Cache is UI source of truth. Atomic writes, bounded cache, graceful corrupt-cache recovery.
+4. **Speed** — Background precompute, no idle polling, measure before optimizing.
+5. **Official docs** — Prefer Rust Book / std / docs.rs / Slint docs over guesswork. Docs win over AI suggestions.
+
+Module boundaries: no reaching into another module's internals. Typed, versioned config with migrations.

@@ -1,0 +1,21 @@
+---
+description: Rust conventions for Wijitify
+globs: "**/*.rs"
+alwaysApply: false
+---
+
+# Rust
+
+- `anyhow::Result` + `?` for fallible paths. No `unwrap()` outside tests (`clippy::unwrap_used`).
+- Never block the Slint/UI thread: no `std::fs`, `reqwest`, parse, or `block_on` in UI callbacks. Spawn on the Tokio runtime; push results with `slint::invoke_from_event_loop` / `Weak::upgrade_in_event_loop`.
+- Prefer `std` over new crates. New dependency → one-line PR reason + `default-features = false` when sensible.
+- Secrets (ICS URLs) never go into `tracing`/`log` output.
+- Module code may only use `ModuleContext` services, not other modules' private types.
+
+```rust
+// BAD — blocks UI
+ui.on_refresh(|| { let body = reqwest::blocking::get(url)?.text()?; ... });
+
+// GOOD — command to background, update models on the UI thread later
+ui.on_refresh(move || { let _ = cmd_tx.try_send(Cmd::Refresh); });
+```

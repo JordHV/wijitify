@@ -1,0 +1,36 @@
+[package]
+name = "wijitify"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Modular Linux touchscreen dashboard — Wijitify shell with Zalender calendar"
+readme = "README.md"
+default-run = "wijitify"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+chrono-tz = "0.10"
+directories = "6"
+icalendar = { version = "0.16", default-features = false, features = ["parser"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+rrule = "0.14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+slint = "1.18"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+slint-build = "1.18"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[lints.clippy]
+unwrap_used = "deny"

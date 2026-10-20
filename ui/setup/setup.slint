@@ -1,0 +1,130 @@
+import { Theme } from "../theme.slint";
+import { NavButton } from "../shell/nav.slint";
+
+export struct SetupModuleRow {
+    id: string,
+    name: string,
+    description: string,
+    selected: bool,
+}
+
+export struct FeedRow {
+    name: string,
+    url: string,
+    color: string,
+}
+
+export component SetupFlow inherits Rectangle {
+    background: Theme.bg;
+
+    in-out property <int> step: 0;
+    in property <[SetupModuleRow]> modules;
+    in-out property <string> zalender-timezone: "America/New_York";
+    in-out property <[FeedRow]> zalender-feeds;
+    in-out property <string> new-feed-name: "";
+    in-out property <string> new-feed-url: "";
+    in-out property <string> new-feed-color: "#3b82f6";
+    in property <bool> show-zalender-page: true;
+
+    callback toggle-module(int);
+    callback add-feed();
+    callback remove-feed(int);
+    callback finish-setup();
+    callback back();
+    callback next();
+
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.pad;
+
+        Text {
+            text: step == 0 ? "Choose modules" : "Zalender setup";
+            color: Theme.text;
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        if step == 0: VerticalLayout {
+            spacing: Theme.pad-sm;
+            for m[i] in modules: ta := TouchArea {
+                min-height: Theme.touch-min;
+                clicked => { root.toggle-module(i); }
+                Rectangle {
+                    background: ta.pressed ? Theme.surface-2 : Theme.surface;
+                    border-radius: 10px;
+                    HorizontalLayout {
+                        padding: Theme.pad;
+                        spacing: Theme.pad;
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            border-radius: 6px;
+                            border-width: 2px;
+                            border-color: Theme.accent;
+                            background: m.selected ? Theme.accent : transparent;
+                        }
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: m.name; color: Theme.text; font-size: 20px; }
+                            Text { text: m.description; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                        }
+                    }
+                }
+            }
+        }
+
+        if step == 1 && show-zalender-page: VerticalLayout {
+            spacing: Theme.pad-sm;
+            Text { text: "Timezone"; color: Theme.muted; font-size: 14px; }
+            Rectangle {
+                height: Theme.touch-min;
+                background: Theme.surface;
+                border-radius: 8px;
+                HorizontalLayout {
+                    padding: Theme.pad-sm;
+                    TextInput {
+                        text <=> root.zalender-timezone;
+                        color: Theme.text;
+                        font-size: 18px;
+                        single-line: true;
+                    }
+                }
+            }
+            Text { text: "Calendar feeds (optional)"; color: Theme.muted; font-size: 14px; }
+            for f[fi] in zalender-feeds: HorizontalLayout {
+                spacing: Theme.pad-sm;
+                min-height: Theme.touch-min;
+                Rectangle {
+                    width: 16px; height: 16px; border-radius: 4px;
+                    background: Theme.accent;
+                    vertical-stretch: 0;
+                }
+                Text { text: f.name + " — " + f.url; color: Theme.text; font-size: 14px; vertical-alignment: center; }
+                NavButton { label: "Remove"; activate => { root.remove-feed(fi); } }
+            }
+            Text { text: "Name"; color: Theme.muted; font-size: 12px; }
+            Rectangle {
+                height: 40px; background: Theme.surface; border-radius: 8px;
+                HorizontalLayout { padding: 8px; TextInput { text <=> root.new-feed-name; color: Theme.text; single-line: true; } }
+            }
+            Text { text: "ICS URL"; color: Theme.muted; font-size: 12px; }
+            Rectangle {
+                height: 40px; background: Theme.surface; border-radius: 8px;
+                HorizontalLayout { padding: 8px; TextInput { text <=> root.new-feed-url; color: Theme.text; single-line: true; } }
+            }
+            NavButton { label: "Add feed"; activate => { root.add-feed(); } }
+        }
+
+        HorizontalLayout {
+            spacing: Theme.pad;
+            alignment: end;
+            if step > 0: NavButton { label: "Back"; activate => { root.back(); } }
+            NavButton {
+                label: step == 0 ? "Next" : "Finish";
+                activate => {
+                    if step == 0 { root.next(); } else { root.finish-setup(); }
+                }
+            }
+        }
+    }
+}

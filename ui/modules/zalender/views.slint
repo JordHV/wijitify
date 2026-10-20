@@ -1,0 +1,145 @@
+import { Theme } from "../../theme.slint";
+import { NavButton } from "../../shell/nav.slint";
+
+export struct DayCell {
+    day: int,
+    in-month: bool,
+    is-today: bool,
+    has-events: bool,
+    label: string,
+}
+
+export struct AgendaItem {
+    time: string,
+    title: string,
+    color: string,
+}
+
+export component ZalenderView inherits Rectangle {
+    background: Theme.bg;
+
+    in property <string> title-month: "";
+    in property <string> status-text: "";
+    in property <bool> refreshing: false;
+    in property <[DayCell]> days;
+    in property <[AgendaItem]> agenda;
+    in property <string> agenda-date: "";
+    in property <bool> empty-feeds: false;
+
+    callback prev-month();
+    callback next-month();
+    callback go-today();
+    callback select-day(int);
+    callback open-settings();
+    callback refresh();
+
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.pad-sm;
+
+        HorizontalLayout {
+            spacing: Theme.pad-sm;
+            NavButton { label: "‹"; activate => { root.prev-month(); } }
+            Text {
+                text: root.title-month;
+                color: Theme.text;
+                font-size: 24px;
+                font-weight: 700;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            NavButton { label: "Today"; activate => { root.go-today(); } }
+            NavButton { label: "›"; activate => { root.next-month(); } }
+            NavButton { label: "↻"; activate => { root.refresh(); } }
+        }
+
+        Text {
+            text: root.refreshing ? "Refreshing…  " + root.status-text : root.status-text;
+            color: Theme.muted;
+            font-size: 14px;
+        }
+
+        if empty-feeds: VerticalLayout {
+            spacing: Theme.pad;
+            alignment: center;
+            Text {
+                text: "No calendars yet";
+                color: Theme.text;
+                font-size: 22px;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "Add an ICS feed in Settings or run setup again.";
+                color: Theme.muted;
+                font-size: 16px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            NavButton { label: "Open settings"; activate => { root.open-settings(); } }
+        }
+
+        if !empty-feeds: VerticalLayout {
+            spacing: Theme.pad-sm;
+            HorizontalLayout {
+                spacing: 4px;
+                for w in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]: Text {
+                    text: w;
+                    color: Theme.muted;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    width: 14%;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 4px;
+                for row in 6: HorizontalLayout {
+                    spacing: 4px;
+                    for col in 7: ta := TouchArea {
+                        property <DayCell> d: days[row * 7 + col];
+                        min-height: 56px;
+                        clicked => { if d.in-month { root.select-day(row * 7 + col); } }
+                        Rectangle {
+                            background: ta.pressed ? Theme.surface-2 : (ta.d.is-today ? Theme.surface-2 : Theme.surface);
+                            border-radius: 8px;
+                            border-width: ta.d.is-today ? 2px : 0;
+                            border-color: Theme.accent;
+                            opacity: ta.d.in-month ? 1.0 : 0.35;
+                            VerticalLayout {
+                                padding: 6px;
+                                Text {
+                                    text: ta.d.label;
+                                    color: Theme.text;
+                                    font-size: 16px;
+                                }
+                                if ta.d.has-events: Rectangle {
+                                    width: 8px; height: 8px; border-radius: 4px;
+                                    background: Theme.accent;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: root.agenda-date;
+                color: Theme.text;
+                font-size: 18px;
+                font-weight: 600;
+            }
+
+            for a in agenda: HorizontalLayout {
+                spacing: Theme.pad-sm;
+                min-height: 40px;
+                Rectangle {
+                    width: 6px; height: 100%;
+                    background: Theme.accent;
+                    border-radius: 3px;
+                }
+                Text { text: a.time; color: Theme.muted; font-size: 14px; width: 72px; vertical-alignment: center; }
+                Text { text: a.title; color: Theme.text; font-size: 16px; vertical-alignment: center; }
+            }
+        }
+    }
+}

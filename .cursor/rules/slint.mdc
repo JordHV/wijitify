@@ -1,0 +1,23 @@
+---
+description: Slint UI conventions for Wijitify
+globs: "**/*.slint"
+alwaysApply: false
+---
+
+# Slint
+
+- Pressed / hover / highlight feedback is pure Slint state. Do not round-trip to Rust for press visuals.
+- Animations ≤ 150 ms; never gate input on animation completion.
+- Keep views thin: bind to models/properties Rust updates asynchronously.
+- Touch targets should be large enough for a finger on a tablet (~48 dp minimum).
+
+```slint
+// BAD — wait for Rust to show pressed
+TouchArea { clicked => { root.request-press(); } }
+
+// GOOD — local visual feedback
+TouchArea {
+    Rectangle { background: parent.pressed ? #334 : #222; }
+    clicked => { root.navigate(); }
+}
+```

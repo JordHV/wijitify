@@ -1,0 +1,72 @@
+import { Theme } from "../theme.slint";
+import { NavButton } from "./nav.slint";
+
+export struct ModuleToggleRow {
+    id: string,
+    name: string,
+    description: string,
+    enabled: bool,
+}
+
+export component SettingsView inherits Rectangle {
+    background: Theme.bg;
+
+    in property <[ModuleToggleRow]> modules;
+    in property <string> perf-overlay: "";
+
+    callback toggle-module(int);
+    callback run-setup-again();
+    callback quit-app();
+    callback close-settings();
+
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.pad;
+
+        HorizontalLayout {
+            Text {
+                text: "Settings";
+                color: Theme.text;
+                font-size: 28px;
+                font-weight: 700;
+                horizontal-stretch: 1;
+            }
+            NavButton { label: "Close"; activate => { root.close-settings(); } }
+        }
+
+        Text { text: "Modules"; color: Theme.muted; font-size: 14px; }
+
+        for m[i] in modules: ta := TouchArea {
+            min-height: Theme.touch-min;
+            clicked => { root.toggle-module(i); }
+            Rectangle {
+                background: ta.pressed ? Theme.surface-2 : Theme.surface;
+                border-radius: 10px;
+                HorizontalLayout {
+                    padding: Theme.pad;
+                    spacing: Theme.pad;
+                    Rectangle {
+                        width: 28px; height: 28px; border-radius: 6px;
+                        border-width: 2px; border-color: Theme.accent;
+                        background: m.enabled ? Theme.accent : transparent;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: m.name; color: Theme.text; font-size: 18px; }
+                        Text { text: m.description; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                    }
+                }
+            }
+        }
+
+        NavButton { label: "Run setup again"; activate => { root.run-setup-again(); } }
+        NavButton { label: "Quit to desktop"; activate => { root.quit-app(); } }
+
+        if perf-overlay != "": Text {
+            text: root.perf-overlay;
+            color: Theme.ok;
+            font-size: 12px;
+            font-family: "monospace";
+        }
+    }
+}
