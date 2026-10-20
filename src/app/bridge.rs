@@ -11,6 +11,7 @@ use crate::modules::{registry, Module, ModuleContext};
 use crate::services::config::Config;
 use crate::services::storage::Paths;
 use crate::services::tasks::TaskRuntime;
+use crate::services::update::{self, UpdateCmd, UpdateState};
 
 // Generated code is not ours to fix; keep the `unwrap_used` deny for hand-written code.
 #[allow(clippy::unwrap_used)]
@@ -33,6 +34,7 @@ pub struct AppCtx {
     pub status: String,
     pub perf_enabled: bool,
     pub refresh_gen: u64,
+    pub update_tx: Option<tokio::sync::mpsc::Sender<UpdateCmd>>,
     modules: Vec<Box<dyn Module>>,
 }
 
@@ -71,6 +73,7 @@ impl AppCtx {
             status: String::new(),
             perf_enabled: std::env::var_os("WIJITIFY_PERF").is_some(),
             refresh_gen: 0,
+            update_tx: None,
             modules: Vec::new(),
         }
     }
@@ -105,7 +108,33 @@ impl AppCtx {
 }
 
 pub fn bind(ui: &AppWindow, ctx: std::rc::Rc<std::cell::RefCell<AppCtx>>) {
+    start_updater(ui, &ctx);
     apply_all(ui, &ctx.borrow());
+
+    {
+        let ctx = ctx.clone();
+        ui.on_check_updates(move || {
+            let t0 = Instant::now();
+            send_update_cmd(&ctx, UpdateCmd::CheckNow);
+            log_cb("check_updates", t0);
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        ui.on_start_update(move || {
+            let t0 = Instant::now();
+            send_update_cmd(&ctx, UpdateCmd::Install);
+            log_cb("start_update", t0);
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        ui.on_restart_app(move || {
+            let t0 = Instant::now();
+            send_update_cmd(&ctx, UpdateCmd::Restart);
+            log_cb("restart_app", t0);
+        });
+    }
 
     {
         let ui_weak = ui.as_weak();
@@ -552,6 +581,79 @@ fn apply_settings(ui: &AppWindow, c: &AppCtx) {
         })
         .collect();
     ui.set_settings_modules(ModelRc::new(VecModel::from(rows)));
+}
+
+fn apply_update(ui: &AppWindow, state: &UpdateState) {
+    let label = if matches!(state, UpdateState::Available { .. }) {
+        "Settings •"
+    } else {
+        "Settings"
+    };
+    ui.set_settings_label(SharedString::from(label));
+    match state {
+        UpdateState::Unsupported => {
+            ui.set_update_status(update::status::UNSUPPORTED);
+            ui.set_update_version(SharedString::new());
+            ui.set_update_notes(SharedString::new());
+            ui.set_update_percent(0);
+            ui.set_update_error(SharedString::new());
+            ui.set_update_checked(SharedString::new());
+        }
+        UpdateState::UpToDate { checked } => {
+            ui.set_update_status(update::status::UP_TO_DATE);
+            ui.set_update_version(SharedString::new());
+            ui.set_update_notes(SharedString::new());
+            ui.set_update_percent(0);
+            ui.set_update_error(SharedString::new());
+            ui.set_update_checked(SharedString::from(checked.as_str()));
+        }
+        UpdateState::Available {
+            version,
+            notes,
+            checked,
+        } => {
+            ui.set_update_status(update::status::AVAILABLE);
+            ui.set_update_version(SharedString::from(version.as_str()));
+            ui.set_update_notes(SharedString::from(notes.as_str()));
+            ui.set_update_percent(0);
+            ui.set_update_error(SharedString::new());
+            ui.set_update_checked(SharedString::from(checked.as_str()));
+        }
+        UpdateState::Installing { percent } => {
+            ui.set_update_status(update::status::INSTALLING);
+            ui.set_update_percent(*percent as i32);
+            ui.set_update_error(SharedString::new());
+        }
+        UpdateState::ReadyToRestart => {
+            ui.set_update_status(update::status::READY_TO_RESTART);
+            ui.set_update_error(SharedString::new());
+        }
+        UpdateState::Failed(msg) => {
+            ui.set_update_status(update::status::FAILED);
+            ui.set_update_error(SharedString::from(msg.as_str()));
+        }
+    }
+}
+
+fn send_update_cmd(ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>, cmd: UpdateCmd) {
+    if let Some(tx) = ctx.borrow().update_tx.as_ref() {
+        let _ = tx.try_send(cmd);
+    }
+}
+
+fn start_updater(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) {
+    let (tx, rx) = tokio::sync::mpsc::channel::<UpdateCmd>(8);
+    let runtime = ctx.borrow().runtime.clone();
+    ctx.borrow_mut().update_tx = Some(tx);
+
+    ui.set_current_version(SharedString::from(env!("CARGO_PKG_VERSION")));
+    let ui_weak = ui.as_weak();
+    let on_state: std::sync::Arc<dyn Fn(UpdateState) + Send + Sync> =
+        std::sync::Arc::new(move |state| {
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| apply_update(&ui, &state));
+        });
+
+    update::start(runtime, rx, on_state);
 }
 
 fn apply_zalender(ui: &AppWindow, c: &AppCtx) {

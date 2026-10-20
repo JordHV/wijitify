@@ -1,6 +1,6 @@
 [package]
 name = "wijitify"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Modular Linux touchscreen dashboard — Wijitify shell with Zalender calendar"
@@ -23,6 +23,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Flatpak portal (Linux only). PR reason: in-app update install + restart via xdg-desktop-portal.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [build-dependencies]
 slint-build = "1.18"

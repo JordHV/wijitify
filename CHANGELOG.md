@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-20
+
+### Added
+
+- In-app updates via a self-hosted Flatpak OSTree repo on GitHub Pages
+- Settings: current version, Check now / Update / Restart, progress and errors
+- Startup + daily update feed check (`latest.json`); `WIJITIFY_UPDATE_*` overrides for development
+- Signed release pipeline publishes `.flatpakref`, `latest.json`, and a repo-aware Flatpak bundle
+- `scripts/flatpak-dev-repo.sh` for fast VM update iteration
+
 ## [0.1.0] - 2026-10-19
 
 ### Added

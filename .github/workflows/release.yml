@@ -4,8 +4,13 @@ on:
   push:
     tags: ["v*"]
 
+concurrency:
+  group: flatpak-repo
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  pages: write
 
 jobs:
   release:
@@ -20,7 +25,7 @@ jobs:
             libfontconfig1-dev libxkbcommon-dev libwayland-dev \
             libx11-dev libxcursor-dev libxcb-render0-dev libxcb-shape0-dev \
             libxcb-xfixes0-dev libxkbcommon-x11-dev libssl-dev pkg-config \
-            flatpak flatpak-builder
+            flatpak flatpak-builder gnupg ostree
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -46,14 +51,118 @@ jobs:
           flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak install -y --user flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08 org.freedesktop.Sdk.Extension.rust-stable//25.08
 
-      - name: Build Flatpak bundle
+      - name: Import GPG key
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+          FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
         run: |
-          flatpak-builder --user --force-clean --repo=repo build-dir packaging/flatpak/io.github.JordHV.Wijitify.yml
-          flatpak build-bundle repo "wijitify-${GITHUB_REF_NAME}.flatpak" io.github.JordHV.Wijitify
+          test -n "$FLATPAK_GPG_PRIVATE_KEY"
+          test -n "$FLATPAK_GPG_KEY_ID"
+          printf '%s\n' "$FLATPAK_GPG_PRIVATE_KEY" | gpg --batch --import
+          echo "FLATPAK_GPG_KEY_ID=$FLATPAK_GPG_KEY_ID" >> "$GITHUB_ENV"
+
+      - name: Fetch existing Pages repo
+        run: |
+          mkdir -p site
+          git fetch origin gh-pages:gh-pages || true
+          if git show-ref --verify --quiet refs/heads/gh-pages; then
+            git archive gh-pages | tar -x -C site || true
+          fi
+          mkdir -p site/repo
+          touch site/.nojekyll
+
+      - name: Build into OSTree repo
+        run: |
+          flatpak-builder --user --force-clean \
+            --gpg-sign="$FLATPAK_GPG_KEY_ID" \
+            --default-branch=stable \
+            --repo=site/repo \
+            build-dir packaging/flatpak/io.github.JordHV.Wijitify.yml
+          flatpak build-update-repo \
+            --gpg-sign="$FLATPAK_GPG_KEY_ID" \
+            --generate-static-deltas \
+            --prune --prune-depth=3 \
+            site/repo
+
+      - name: Write Pages metadata
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          GPG_B64=$(base64 -w0 packaging/flatpak/wijitify.gpg)
+          REPO_URL="https://jordhv.github.io/wijitify/repo"
+
+          cat > site/wijitify.flatpakrepo <<EOF
+          [Flatpak Repo]
+          Title=Wijitify
+          Url=${REPO_URL}
+          Homepage=https://github.com/JordHV/wijitify
+          Comment=Self-hosted Wijitify Flatpak repository
+          GPGKey=${GPG_B64}
+          EOF
+          # Strip accidental leading spaces from the YAML-indented heredoc
+          sed -i 's/^[[:space:]]*//' site/wijitify.flatpakrepo
+
+          cat > site/io.github.JordHV.Wijitify.flatpakref <<EOF
+          [Flatpak Ref]
+          Name=io.github.JordHV.Wijitify
+          Branch=stable
+          Title=Wijitify
+          Url=${REPO_URL}
+          Homepage=https://github.com/JordHV/wijitify
+          IsRuntime=false
+          GPGKey=${GPG_B64}
+          RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+          EOF
+          sed -i 's/^[[:space:]]*//' site/io.github.JordHV.Wijitify.flatpakref
+
+          python3 - <<PY
+          from pathlib import Path
+          import json, datetime, re
+          version = "${VERSION}"
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          notes = []
+          capture = False
+          for line in text.splitlines():
+              if line.startswith("## ["):
+                  if capture:
+                      break
+                  capture = True
+                  continue
+              if capture:
+                  notes.append(line)
+          body = "\n".join(notes).strip()
+          Path("site/latest.json").write_text(
+              json.dumps({
+                  "version": version,
+                  "notes": body,
+                  "published": datetime.date.today().isoformat(),
+              }, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Build Flatpak bundle with repo URL
+        run: |
+          flatpak build-bundle \
+            --repo-url=https://jordhv.github.io/wijitify/repo \
+            --gpg-keys=packaging/flatpak/wijitify.gpg \
+            site/repo \
+            "wijitify-${GITHUB_REF_NAME}.flatpak" \
+            io.github.JordHV.Wijitify \
+            stable
           sha256sum "wijitify-${GITHUB_REF_NAME}.flatpak" > "wijitify-${GITHUB_REF_NAME}.flatpak.sha256"
 
+      - name: Publish gh-pages
+        run: |
+          cd site
+          git init
+          git checkout --orphan gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Flatpak repo ${GITHUB_REF_NAME}"
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:gh-pages
+
       - name: Extract changelog notes
-        id: notes
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -80,3 +189,4 @@ jobs:
           files: |
             wijitify-${{ github.ref_name }}.flatpak
             wijitify-${{ github.ref_name }}.flatpak.sha256
+            packaging/flatpak/wijitify.gpg

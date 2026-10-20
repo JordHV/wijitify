@@ -60,3 +60,40 @@ Offline crate docs: `cargo doc --open`.
 ## App ID
 
 Flatpak / desktop id: `io.github.JordHV.Wijitify`. The XDG data/config path stays `Wijitify` (`ProjectDirs::from("io", "github", "Wijitify")`).
+
+## In-app updates — fast VM loop
+
+Production checks `latest.json` at startup and every 24h. For local Flatpak iteration:
+
+```bash
+# inside the VM, in a git clone (not a shared folder)
+./scripts/flatpak-dev-repo.sh
+flatpak run io.github.JordHV.Wijitify
+```
+
+Each cycle: bump `version` in `Cargo.toml` (no need to commit), rerun the script, then tap **Check now** in Settings (or wait ~15s). Tap **Update**, then **Restart now**.
+
+The script sets:
+
+- `WIJITIFY_UPDATE_FEED=http://127.0.0.1:8000/latest.json`
+- `WIJITIFY_UPDATE_INTERVAL_SECS=15`
+
+via `flatpak override`. Clear with:
+
+```bash
+flatpak override --user --reset io.github.JordHV.Wijitify
+```
+
+### Banner UI on Windows (no Flatpak install/restart)
+
+```powershell
+# terminal 1: serve a hand-edited latest.json
+python -m http.server 8000
+
+# terminal 2
+$env:WIJITIFY_UPDATE_FEED = "http://127.0.0.1:8000/latest.json"
+$env:WIJITIFY_UPDATE_INTERVAL_SECS = "15"
+cargo run -- --windowed
+```
+
+**Update** / **Restart** report “not running as a Flatpak” outside a Flatpak runtime.

@@ -7,6 +7,7 @@ sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: wijitify
+# Freeze these permissions: the Flatpak portal refuses in-app updates that expand them.
 finish-args:
   - --socket=wayland
   - --socket=fallback-x11

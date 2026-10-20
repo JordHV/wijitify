@@ -31,6 +31,14 @@ export component AppWindow inherits Window {
 
     // settings
     in property <[ModuleToggleRow]> settings-modules;
+    in property <string> current-version: "";
+    in property <int> update-status: 0;
+    in property <string> update-version: "";
+    in property <string> update-notes: "";
+    in property <int> update-percent: 0;
+    in property <string> update-error: "";
+    in property <string> update-checked: "";
+    in property <string> settings-label: "Settings";
 
     // zalender
     in property <string> zal-title-month: "";
@@ -53,6 +61,9 @@ export component AppWindow inherits Window {
     callback settings-toggle-module(int);
     callback run-setup-again();
     callback quit-app();
+    callback check-updates();
+    callback start-update();
+    callback restart-app();
 
     callback zal-prev-month();
     callback zal-next-month();
@@ -106,7 +117,7 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                         horizontal-alignment: center;
                     }
-                    NavButton { label: "Settings"; activate => { root.open-settings(); } }
+                    NavButton { label: root.settings-label; activate => { root.open-settings(); } }
                 }
             }
 
@@ -143,10 +154,20 @@ export component AppWindow inherits Window {
         if screen == 2: SettingsView {
             modules: root.settings-modules;
             perf-overlay: root.perf-overlay;
+            current-version: root.current-version;
+            update-status: root.update-status;
+            update-version: root.update-version;
+            update-notes: root.update-notes;
+            update-percent: root.update-percent;
+            update-error: root.update-error;
+            update-checked: root.update-checked;
             toggle-module(i) => { root.settings-toggle-module(i); }
             run-setup-again => { root.run-setup-again(); }
             quit-app => { root.quit-app(); }
             close-settings => { root.close-settings(); }
+            check-updates => { root.check-updates(); }
+            start-update => { root.start-update(); }
+            restart-app => { root.restart-app(); }
         }
     }
 
