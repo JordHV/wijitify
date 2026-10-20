@@ -5,6 +5,7 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Modular Linux touchscreen dashboard — Wijitify shell with Zalender calendar"
 readme = "README.md"
+repository = "https://github.com/JordHV/wijitify"
 default-run = "wijitify"
 
 [dependencies]
