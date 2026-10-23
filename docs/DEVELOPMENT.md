@@ -86,8 +86,10 @@ flatpak override --user --reset io.github.JordHV.Wijitify
 
 ### Banner UI on Windows (no Flatpak install/restart)
 
+Plain `cargo run -- --windowed` still shows **Wijitify → Wijitify \<version\>** (from `Cargo.toml`), but skips feed checks. To exercise the update banner, point at a feed whose `version` is **newer** than `Cargo.toml` (production `latest.json` will only say “Up to date” when they match):
+
 ```powershell
-# terminal 1: serve a hand-edited latest.json
+# terminal 1: serve a hand-edited latest.json (e.g. version "9.9.9")
 python -m http.server 8000
 
 # terminal 2

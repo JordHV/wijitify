@@ -1,5 +1,5 @@
 import { Theme } from "../theme.slint";
-import { NavButton } from "../shell/nav.slint";
+import { Button, Field, Row, Banner } from "../shell/kit.slint";
 
 export struct SetupModuleRow {
     id: string,
@@ -11,7 +11,7 @@ export struct SetupModuleRow {
 export struct FeedRow {
     name: string,
     url: string,
-    color: string,
+    color: color,
 }
 
 export component SetupFlow inherits Rectangle {
@@ -25,6 +25,8 @@ export component SetupFlow inherits Rectangle {
     in-out property <string> new-feed-url: "";
     in-out property <string> new-feed-color: "#3b82f6";
     in property <bool> show-zalender-page: true;
+    in property <string> banner-message: "";
+    in property <int> banner-kind: 0;
 
     callback toggle-module(int);
     callback add-feed();
@@ -40,87 +42,77 @@ export component SetupFlow inherits Rectangle {
         Text {
             text: step == 0 ? "Choose modules" : "Zalender setup";
             color: Theme.text;
-            font-size: 28px;
+            font-size: Theme.font-title;
             font-weight: 700;
         }
 
         if step == 0: VerticalLayout {
             spacing: Theme.pad-sm;
-            for m[i] in modules: ta := TouchArea {
-                min-height: Theme.touch-min;
-                clicked => { root.toggle-module(i); }
-                Rectangle {
-                    background: ta.pressed ? Theme.surface-2 : Theme.surface;
-                    border-radius: 10px;
-                    HorizontalLayout {
-                        padding: Theme.pad;
-                        spacing: Theme.pad;
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 6px;
-                            border-width: 2px;
-                            border-color: Theme.accent;
-                            background: m.selected ? Theme.accent : transparent;
-                        }
-                        VerticalLayout {
-                            spacing: 4px;
-                            Text { text: m.name; color: Theme.text; font-size: 20px; }
-                            Text { text: m.description; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
-                        }
-                    }
-                }
+            for m[i] in modules: Row {
+                title: m.name;
+                caption: m.description;
+                mark: "check";
+                checked: m.selected;
+                activate => { root.toggle-module(i); }
             }
         }
 
         if step == 1 && show-zalender-page: VerticalLayout {
             spacing: Theme.pad-sm;
-            Text { text: "Timezone"; color: Theme.muted; font-size: 14px; }
-            Rectangle {
-                height: Theme.touch-min;
-                background: Theme.surface;
-                border-radius: 8px;
-                HorizontalLayout {
-                    padding: Theme.pad-sm;
-                    TextInput {
-                        text <=> root.zalender-timezone;
-                        color: Theme.text;
-                        font-size: 18px;
-                        single-line: true;
-                    }
-                }
+            Field {
+                caption: "Timezone";
+                text <=> root.zalender-timezone;
             }
-            Text { text: "Calendar feeds (optional)"; color: Theme.muted; font-size: 14px; }
+            Text {
+                text: "Calendar feeds";
+                color: Theme.muted;
+                font-size: Theme.font-caption;
+            }
             for f[fi] in zalender-feeds: HorizontalLayout {
                 spacing: Theme.pad-sm;
-                min-height: Theme.touch-min;
-                Rectangle {
-                    width: 16px; height: 16px; border-radius: 4px;
-                    background: Theme.accent;
-                    vertical-stretch: 0;
+                Row {
+                    horizontal-stretch: 1;
+                    title: f.name;
+                    caption: f.url;
+                    mark: "color";
+                    mark-color: f.color;
                 }
-                Text { text: f.name + " — " + f.url; color: Theme.text; font-size: 14px; vertical-alignment: center; }
-                NavButton { label: "Remove"; activate => { root.remove-feed(fi); } }
+                Button {
+                    label: "Remove";
+                    role: "danger";
+                    activate => { root.remove-feed(fi); }
+                }
             }
-            Text { text: "Name"; color: Theme.muted; font-size: 12px; }
-            Rectangle {
-                height: 40px; background: Theme.surface; border-radius: 8px;
-                HorizontalLayout { padding: 8px; TextInput { text <=> root.new-feed-name; color: Theme.text; single-line: true; } }
+            Field {
+                caption: "Name";
+                text <=> root.new-feed-name;
             }
-            Text { text: "ICS URL"; color: Theme.muted; font-size: 12px; }
-            Rectangle {
-                height: 40px; background: Theme.surface; border-radius: 8px;
-                HorizontalLayout { padding: 8px; TextInput { text <=> root.new-feed-url; color: Theme.text; single-line: true; } }
+            Field {
+                caption: "ICS URL";
+                text <=> root.new-feed-url;
             }
-            NavButton { label: "Add feed"; activate => { root.add-feed(); } }
+            Banner {
+                message: root.banner-message;
+                kind: root.banner-kind;
+            }
+            Button {
+                label: "Add feed";
+                role: "secondary";
+                activate => { root.add-feed(); }
+            }
         }
 
         HorizontalLayout {
             spacing: Theme.pad;
             alignment: end;
-            if step > 0: NavButton { label: "Back"; activate => { root.back(); } }
-            NavButton {
+            if step > 0: Button {
+                label: "Back";
+                role: "secondary";
+                activate => { root.back(); }
+            }
+            Button {
                 label: step == 0 ? "Next" : "Finish";
+                role: "primary";
                 activate => {
                     if step == 0 { root.next(); } else { root.finish-setup(); }
                 }

@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-22
+
+### Added
+
+- Shared Slint visual kit: Theme tokens, Button / Field / Row / Banner, dark and light palettes
+- Settings theme, editable component palette, font family and scale (config schema 7)
+- Calendar presets: built-in day, week, month, year, and agenda, plus custom presets
+- Agenda view (count is weeks of chronological list) and a year view
+- Display options: dim past days and shade weekends (on by default)
+- Now marker (dot and line) on today's column in day and week grids
+- Second sidebar mini-month; event chips with title-first layout
+- Per-event local overrides (color, icon, custom fields) stored beside config, not in the ICS cache
+- Font Awesome and sidebar icons
+
+### Fixed
+
+- Setup Add feed never copied the name and URL into Rust (feeds stayed empty); Finish flushes a pending row
+- Empty-name feeds default to the URL host; an invalid or missing URL shows a banner
+- Public Google-style ICS URLs: `#` in the calendar id is normalized to `%23` before fetch
+
+### Changed
+
+- Dashboard top bar: clock, period title with chevrons, Today, and the preset pill
+- Month grid: hairline cells, today ring, overflow count; day modal uses a stroked panel
+- Day, single-week, and agenda show title then time; month shows title only
+- Feed color drives day dots and agenda bars; status reports how many events loaded
+
 ## [0.2.1] - 2026-10-20
 
 ### Changed

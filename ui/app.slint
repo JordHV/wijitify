@@ -1,23 +1,37 @@
 import { Theme } from "./theme.slint";
-import { NavButton } from "./shell/nav.slint";
-import { SettingsView, ModuleToggleRow } from "./shell/settings.slint";
+import { Icons } from "./icons.slint";
+import { IconButton } from "./shell/kit.slint";
+import {
+    SettingsOverlay, ModuleToggleRow, SettingsFeedRow, SettingsFieldDefRow, ThemeColorRow,
+    SettingsPresetRow, WeekdayCheck
+} from "./shell/settings.slint";
 import { SetupFlow, SetupModuleRow, FeedRow } from "./setup/setup.slint";
-import { ZalenderView, DayCell, AgendaItem } from "./modules/zalender/views.slint";
+import {
+    ZalenderView, DayCell, FeedChip, EventRow, CustomFieldRow, DayHourBucket
+} from "./modules/zalender/views.slint";
 
-export { ModuleToggleRow, SetupModuleRow, FeedRow, DayCell, AgendaItem }
+export {
+    Theme, ModuleToggleRow, SetupModuleRow, FeedRow, DayCell,
+    FeedChip, EventRow, CustomFieldRow, DayHourBucket, SettingsFeedRow, SettingsFieldDefRow, ThemeColorRow,
+    SettingsPresetRow, WeekdayCheck
+}
 
 export component AppWindow inherits Window {
     title: "Wijitify";
     preferred-width: 1280px;
     preferred-height: 800px;
+    min-width: 1280px;
+    min-height: 800px;
     background: Theme.bg;
-    default-font-family: "Segoe UI";
+    default-font-family: Theme.font-family;
+    default-font-size: Theme.font-caption;
 
-    // 0 setup, 1 home, 2 settings
+    // 0 setup, 1 home (settings is overlay)
     in-out property <int> screen: 0;
     in-out property <string> active-module: "zalender";
     in property <string> clock-text: "";
     in property <string> perf-overlay: "";
+    in property <bool> settings-open: false;
 
     // setup
     in-out property <int> setup-step: 0;
@@ -28,9 +42,63 @@ export component AppWindow inherits Window {
     in-out property <string> new-feed-url: "";
     in-out property <string> new-feed-color: "#3b82f6";
     in property <bool> show-zalender-setup: true;
+    in property <string> setup-banner-message: "";
+    in property <int> setup-banner-kind: 0;
 
-    // settings
+    // settings overlay
+    in property <int> settings-page: 0;
+    in property <[string]> settings-page-names;
+    in property <[int]> settings-visible-pages;
     in property <[ModuleToggleRow]> settings-modules;
+    in property <bool> theme-is-dark: true;
+    in property <[ThemeColorRow]> theme-colors;
+    in property <string> theme-banner: "";
+    in property <int> theme-banner-kind: 0;
+    in property <[SettingsFeedRow]> settings-feeds;
+    in property <string> settings-feed-banner: "";
+    in property <int> settings-feed-banner-kind: 0;
+    in-out property <string> settings-new-feed-name: "";
+    in-out property <string> settings-new-feed-url: "";
+    in-out property <string> settings-new-feed-color: "#3b82f6";
+    in property <[SettingsPresetRow]> settings-presets;
+    in property <bool> preset-selected: false;
+    in property <bool> preset-is-builtin: false;
+    in property <int> preset-index: 0;
+    in-out property <string> preset-name: "";
+    in property <int> preset-unit: 2;
+    in property <int> preset-count: 1;
+    in property <int> preset-anchor: 0;
+    in property <int> preset-day-start-hour: 6;
+    in property <int> preset-day-end-hour: 21;
+    in property <int> preset-day-interval: 2;
+    in property <[WeekdayCheck]> preset-weekdays;
+    in property <int> preset-month-weeks: 6;
+    in property <bool> preset-month-from-week: false;
+    in property <[string]> week-count-options;
+    in property <[string]> unit-options;
+    in property <[string]> count-options;
+    in property <[string]> anchor-options;
+    in property <[string]> hour-options;
+    in property <[string]> interval-options;
+    in property <int> week-start: 0;
+    in property <[string]> week-start-options;
+    in property <int> datetime-format: 0;
+    in property <[string]> datetime-options;
+    in property <int> font-family: 0;
+    in property <[string]> font-family-options;
+    in property <int> font-scale: 1;
+    in property <[string]> font-scale-options;
+    in property <bool> modal-show-time: true;
+    in property <bool> modal-show-title: true;
+    in property <bool> modal-show-calendar: true;
+    in property <bool> modal-show-description: true;
+    in property <bool> dim-past: true;
+    in property <bool> shade-weekends: true;
+    in property <[SettingsFieldDefRow]> custom-field-defs;
+    in-out property <string> new-field-name: "";
+    in property <int> new-field-type: 0;
+    in property <[string]> field-type-options;
+    in property <string> help-text: "";
     in property <string> current-version: "";
     in property <int> update-status: 0;
     in property <string> update-version: "";
@@ -38,16 +106,59 @@ export component AppWindow inherits Window {
     in property <int> update-percent: 0;
     in property <string> update-error: "";
     in property <string> update-checked: "";
-    in property <string> settings-label: "Settings";
 
     // zalender
-    in property <string> zal-title-month: "";
+    in property <string> zal-title-period: "";
     in property <string> zal-status: "";
+    in property <int> zal-status-kind: 0;
     in property <bool> zal-refreshing: false;
-    in property <[DayCell]> zal-days;
-    in property <[AgendaItem]> zal-agenda;
-    in property <string> zal-agenda-date: "";
     in property <bool> zal-empty-feeds: false;
+    in property <int> zal-view-unit: 2;
+    in property <int> zal-view-count: 1;
+    in property <[string]> zal-preset-options;
+    in property <int> zal-preset-selected: 0;
+    in property <string> zal-preset-label: "Month";
+    in property <[string]> zal-week-labels;
+    in property <[string]> zal-grid-labels;
+    in property <int> zal-grid-columns: 7;
+    in property <int> zal-month-rows: 6;
+    in property <string> zal-side-title: "";
+    in property <[DayCell]> zal-side-days;
+    in property <[DayCell]> zal-main-days;
+    in property <[string]> zal-year-month-titles;
+    in property <[FeedChip]> zal-feeds;
+    in property <[DayHourBucket]> zal-hour-slots;
+    in property <[DayHourBucket]> zal-day-hour-buckets;
+    in property <int> zal-now-mins: 0;
+    in property <bool> zal-show-event-time: false;
+    in property <bool> zal-dim-past: true;
+    in property <bool> zal-shade-weekends: true;
+    in property <bool> zal-day-modal-open: false;
+    in property <string> zal-day-modal-title: "";
+    in property <string> zal-selected-date-key: "";
+    in property <[EventRow]> zal-day-events;
+    in-out property <bool> zal-name-local-open: false;
+    in-out property <string> zal-name-local-draft: "";
+    in-out property <bool> zal-create-event-open: false;
+    in-out property <string> zal-create-title: "";
+    in property <string> zal-create-date-key: "";
+    in property <string> zal-create-date-label: "";
+    in property <int> zal-create-start-mins: 540;
+    in property <int> zal-create-end-mins: 600;
+    in property <bool> zal-create-all-day: false;
+    in property <string> zal-create-calendar-name: "";
+    in property <string> zal-create-start-label: "";
+    in property <string> zal-create-end-label: "";
+    in property <bool> zal-event-detail-open: false;
+    in property <EventRow> zal-detail-event;
+    in property <string> zal-detail-custom-summary: "";
+    in property <bool> zal-customize-open: false;
+    in property <string> zal-customize-color: "";
+    in property <string> zal-customize-icon: "";
+    in property <bool> zal-customize-occurrence: false;
+    in property <bool> zal-customize-has-recurrence: false;
+    in property <[CustomFieldRow]> zal-customize-fields;
+    in property <bool> zal-edit-placeholder-open: false;
 
     callback setup-toggle-module(int);
     callback setup-add-feed();
@@ -58,24 +169,90 @@ export component AppWindow inherits Window {
 
     callback open-settings();
     callback close-settings();
+    callback settings-select-page(int);
     callback settings-toggle-module(int);
+    callback settings-set-theme(int);
+    callback settings-set-theme-color(int, string);
+    callback settings-reset-theme-colors();
+    callback settings-toggle-feed-visible(int);
+    callback settings-remove-feed(int);
+    callback settings-add-feed();
+    callback settings-update-feed(int, string, string, string);
+    callback settings-select-preset(int);
+    callback settings-toggle-preset-visible(int);
+    callback settings-set-default-preset(int);
+    callback settings-add-preset();
+    callback settings-remove-preset(int);
+    callback settings-reset-preset(int);
+    callback settings-set-preset-name(string);
+    callback settings-set-preset-unit(int);
+    callback settings-set-preset-count(int);
+    callback settings-set-preset-anchor(int);
+    callback settings-set-preset-day-start(int);
+    callback settings-set-preset-day-end(int);
+    callback settings-set-preset-day-interval(int);
+    callback settings-set-preset-weekday(int, bool);
+    callback settings-set-preset-month-weeks(int);
+    callback settings-set-preset-month-from-week(bool);
+    callback settings-set-week-start(int);
+    callback settings-set-datetime-format(int);
+    callback settings-set-font-family(int);
+    callback settings-set-font-scale(int);
+    callback settings-set-modal-show-time(bool);
+    callback settings-set-modal-show-title(bool);
+    callback settings-set-modal-show-calendar(bool);
+    callback settings-set-modal-show-description(bool);
+    callback settings-set-dim-past(bool);
+    callback settings-set-shade-weekends(bool);
+    callback settings-add-custom-field();
+    callback settings-remove-custom-field(int);
+    callback settings-set-new-field-type(int);
     callback run-setup-again();
     callback quit-app();
     callback check-updates();
     callback start-update();
     callback restart-app();
 
-    callback zal-prev-month();
-    callback zal-next-month();
+    callback zal-prev-period();
+    callback zal-next-period();
+    callback zal-zoom-out();
     callback zal-go-today();
-    callback zal-select-day(int);
+    callback zal-go-preset();
+    callback zal-select-preset(int);
+    callback zal-select-date(string);
+    callback zal-select-side-date(string);
     callback zal-refresh();
-
-    // Hidden corner long-press exit (maintenance)
-    property <bool> corner-held: false;
+    callback zal-toggle-feed(int);
+    callback zal-set-default-feed(int);
+    callback zal-close-day-modal();
+    callback zal-open-create-event(string, int);
+    callback zal-close-create-event();
+    callback zal-create-set-title(string);
+    callback zal-create-set-all-day(bool);
+    callback zal-create-set-start-mins(int);
+    callback zal-create-set-end-mins(int);
+    callback zal-create-save();
+    callback zal-name-local-set(string);
+    callback zal-name-local-save();
+    callback zal-open-event(int);
+    callback zal-open-event-uid(string, string);
+    callback zal-close-event-detail();
+    callback zal-open-customize();
+    callback zal-open-edit();
+    callback zal-close-customize();
+    callback zal-close-edit-placeholder();
+    callback zal-customize-set-color(string);
+    callback zal-customize-set-icon(string);
+    callback zal-customize-set-occurrence(bool);
+    callback zal-customize-set-field(string, string);
+    callback zal-customize-save();
 
     VerticalLayout {
+        width: 100%;
+        height: 100%;
+
         if screen == 0: SetupFlow {
+            vertical-stretch: 1;
             step <=> root.setup-step;
             modules: root.setup-modules;
             zalender-timezone <=> root.zalender-timezone;
@@ -84,6 +261,8 @@ export component AppWindow inherits Window {
             new-feed-url <=> root.new-feed-url;
             new-feed-color <=> root.new-feed-color;
             show-zalender-page: root.show-zalender-setup;
+            banner-message: root.setup-banner-message;
+            banner-kind: root.setup-banner-kind;
             toggle-module(i) => { root.setup-toggle-module(i); }
             add-feed => { root.setup-add-feed(); }
             remove-feed(i) => { root.setup-remove-feed(i); }
@@ -92,89 +271,222 @@ export component AppWindow inherits Window {
             finish-setup => { root.setup-finish(); }
         }
 
-        if screen == 1: VerticalLayout {
-            Rectangle {
-                background: Theme.surface;
-                min-height: Theme.touch-min;
-                max-height: Theme.touch-min;
-
-                HorizontalLayout {
-                    padding: Theme.pad-sm;
-                    spacing: Theme.pad-sm;
-
-                    Text {
-                        text: "Wijitify";
-                        color: Theme.text;
-                        font-size: 18px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: root.clock-text;
-                        color: Theme.muted;
-                        font-size: 16px;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                        horizontal-alignment: center;
-                    }
-                    NavButton { label: root.settings-label; activate => { root.open-settings(); } }
-                }
-            }
-
+        if screen == 1: Rectangle {
+            vertical-stretch: 1;
+            horizontal-stretch: 1;
             if active-module == "zalender": ZalenderView {
-                title-month: root.zal-title-month;
+                width: 100%;
+                height: 100%;
+                clock-text: root.clock-text;
+                title-period: root.zal-title-period;
                 status-text: root.zal-status;
+                status-kind: root.zal-status-kind;
                 refreshing: root.zal-refreshing;
-                days: root.zal-days;
-                agenda: root.zal-agenda;
-                agenda-date: root.zal-agenda-date;
                 empty-feeds: root.zal-empty-feeds;
-                prev-month => { root.zal-prev-month(); }
-                next-month => { root.zal-next-month(); }
+                view-unit: root.zal-view-unit;
+                view-count: root.zal-view-count;
+                preset-options: root.zal-preset-options;
+                preset-selected: root.zal-preset-selected;
+                preset-label: root.zal-preset-label;
+                week-labels: root.zal-week-labels;
+                grid-labels: root.zal-grid-labels;
+                grid-columns: root.zal-grid-columns;
+                month-rows: root.zal-month-rows;
+                side-title: root.zal-side-title;
+                side-days: root.zal-side-days;
+                main-days: root.zal-main-days;
+                year-month-titles: root.zal-year-month-titles;
+                feeds: root.zal-feeds;
+                hour-slots: root.zal-hour-slots;
+                day-hour-buckets: root.zal-day-hour-buckets;
+                now-mins: root.zal-now-mins;
+                show-event-time: root.zal-show-event-time;
+                dim-past: root.zal-dim-past;
+                shade-weekends: root.zal-shade-weekends;
+                day-modal-open: root.zal-day-modal-open;
+                day-modal-title: root.zal-day-modal-title;
+                selected-date-key: root.zal-selected-date-key;
+                day-events: root.zal-day-events;
+                name-local-open: root.zal-name-local-open;
+                name-local-draft <=> root.zal-name-local-draft;
+                create-event-open: root.zal-create-event-open;
+                create-title <=> root.zal-create-title;
+                create-date-key: root.zal-create-date-key;
+                create-date-label: root.zal-create-date-label;
+                create-start-mins: root.zal-create-start-mins;
+                create-end-mins: root.zal-create-end-mins;
+                create-all-day: root.zal-create-all-day;
+                create-calendar-name: root.zal-create-calendar-name;
+                create-start-label: root.zal-create-start-label;
+                create-end-label: root.zal-create-end-label;
+                event-detail-open: root.zal-event-detail-open;
+                detail-event: root.zal-detail-event;
+                detail-custom-summary: root.zal-detail-custom-summary;
+                customize-open: root.zal-customize-open;
+                customize-color: root.zal-customize-color;
+                customize-icon: root.zal-customize-icon;
+                customize-occurrence: root.zal-customize-occurrence;
+                customize-has-recurrence: root.zal-customize-has-recurrence;
+                customize-fields: root.zal-customize-fields;
+                edit-placeholder-open: root.zal-edit-placeholder-open;
+                prev-period => { root.zal-prev-period(); }
+                next-period => { root.zal-next-period(); }
+                zoom-out => { root.zal-zoom-out(); }
                 go-today => { root.zal-go-today(); }
-                select-day(i) => { root.zal-select-day(i); }
+                go-preset => { root.zal-go-preset(); }
+                select-preset(i) => { root.zal-select-preset(i); }
                 open-settings => { root.open-settings(); }
                 refresh => { root.zal-refresh(); }
+                select-date(k) => { root.zal-select-date(k); }
+                select-side-date(k) => { root.zal-select-side-date(k); }
+                toggle-feed(i) => { root.zal-toggle-feed(i); }
+                set-default-feed(i) => { root.zal-set-default-feed(i); }
+                close-day-modal => { root.zal-close-day-modal(); }
+                open-create-event(k, m) => { root.zal-open-create-event(k, m); }
+                close-create-event => { root.zal-close-create-event(); }
+                create-set-title(t) => { root.zal-create-set-title(t); }
+                create-set-all-day(v) => { root.zal-create-set-all-day(v); }
+                create-set-start-mins(m) => { root.zal-create-set-start-mins(m); }
+                create-set-end-mins(m) => { root.zal-create-set-end-mins(m); }
+                create-save => { root.zal-create-save(); }
+                name-local-set(t) => { root.zal-name-local-set(t); }
+                name-local-save => { root.zal-name-local-save(); }
+                open-event(i) => { root.zal-open-event(i); }
+                open-event-uid(k, u) => { root.zal-open-event-uid(k, u); }
+                close-event-detail => { root.zal-close-event-detail(); }
+                open-customize => { root.zal-open-customize(); }
+                open-edit => { root.zal-open-edit(); }
+                close-customize => { root.zal-close-customize(); }
+                close-edit-placeholder => { root.zal-close-edit-placeholder(); }
+                customize-set-color(c) => { root.zal-customize-set-color(c); }
+                customize-set-icon(i) => { root.zal-customize-set-icon(i); }
+                customize-set-occurrence(o) => { root.zal-customize-set-occurrence(o); }
+                customize-set-field(id, v) => { root.zal-customize-set-field(id, v); }
+                customize-save => { root.zal-customize-save(); }
             }
 
-            if active-module != "zalender": Rectangle {
+            if active-module == "": Rectangle {
+                width: 100%;
+                height: 100%;
                 background: Theme.bg;
-                Text {
-                    text: "No module enabled";
-                    color: Theme.muted;
-                    font-size: 20px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    width: 100%;
-                    height: 100%;
+                IconButton {
+                    x: Theme.pad-sm;
+                    y: Theme.pad-sm;
+                    icon: Icons.gear-hollow;
+                    activate => { root.open-settings(); }
                 }
             }
-        }
 
-        if screen == 2: SettingsView {
-            modules: root.settings-modules;
-            perf-overlay: root.perf-overlay;
-            current-version: root.current-version;
-            update-status: root.update-status;
-            update-version: root.update-version;
-            update-notes: root.update-notes;
-            update-percent: root.update-percent;
-            update-error: root.update-error;
-            update-checked: root.update-checked;
-            toggle-module(i) => { root.settings-toggle-module(i); }
-            run-setup-again => { root.run-setup-again(); }
-            quit-app => { root.quit-app(); }
-            close-settings => { root.close-settings(); }
-            check-updates => { root.check-updates(); }
-            start-update => { root.start-update(); }
-            restart-app => { root.restart-app(); }
+            if settings-open: SettingsOverlay {
+                width: 100%;
+                height: 100%;
+                z: 100;
+                page: root.settings-page;
+                page-names: root.settings-page-names;
+                visible-pages: root.settings-visible-pages;
+                modules: root.settings-modules;
+                theme-is-dark: root.theme-is-dark;
+                theme-colors: root.theme-colors;
+                theme-banner: root.theme-banner;
+                theme-banner-kind: root.theme-banner-kind;
+                feeds: root.settings-feeds;
+                feed-banner: root.settings-feed-banner;
+                feed-banner-kind: root.settings-feed-banner-kind;
+                new-feed-name <=> root.settings-new-feed-name;
+                new-feed-url <=> root.settings-new-feed-url;
+                new-feed-color <=> root.settings-new-feed-color;
+                presets: root.settings-presets;
+                preset-selected: root.preset-selected;
+                preset-is-builtin: root.preset-is-builtin;
+                preset-index: root.preset-index;
+                preset-name <=> root.preset-name;
+                preset-unit: root.preset-unit;
+                preset-count: root.preset-count;
+                preset-anchor: root.preset-anchor;
+                preset-day-start-hour: root.preset-day-start-hour;
+                preset-day-end-hour: root.preset-day-end-hour;
+                preset-day-interval: root.preset-day-interval;
+                preset-weekdays: root.preset-weekdays;
+                preset-month-weeks: root.preset-month-weeks;
+                preset-month-from-week: root.preset-month-from-week;
+                week-count-options: root.week-count-options;
+                unit-options: root.unit-options;
+                count-options: root.count-options;
+                anchor-options: root.anchor-options;
+                hour-options: root.hour-options;
+                interval-options: root.interval-options;
+                week-start: root.week-start;
+                week-start-options: root.week-start-options;
+                datetime-format: root.datetime-format;
+                datetime-options: root.datetime-options;
+                font-family: root.font-family;
+                font-family-options: root.font-family-options;
+                font-scale: root.font-scale;
+                font-scale-options: root.font-scale-options;
+                modal-show-time: root.modal-show-time;
+                modal-show-title: root.modal-show-title;
+                modal-show-calendar: root.modal-show-calendar;
+                modal-show-description: root.modal-show-description;
+                dim-past: root.dim-past;
+                shade-weekends: root.shade-weekends;
+                custom-field-defs: root.custom-field-defs;
+                new-field-name <=> root.new-field-name;
+                new-field-type: root.new-field-type;
+                field-type-options: root.field-type-options;
+                help-text: root.help-text;
+                perf-overlay: root.perf-overlay;
+                current-version: root.current-version;
+                update-status: root.update-status;
+                update-version: root.update-version;
+                update-notes: root.update-notes;
+                update-percent: root.update-percent;
+                update-error: root.update-error;
+                update-checked: root.update-checked;
+                select-page(i) => { root.settings-select-page(i); }
+                close-settings => { root.close-settings(); }
+                toggle-module(i) => { root.settings-toggle-module(i); }
+                set-theme(i) => { root.settings-set-theme(i); }
+                set-theme-color(i, hex) => { root.settings-set-theme-color(i, hex); }
+                reset-theme-colors => { root.settings-reset-theme-colors(); }
+                toggle-feed-visible(i) => { root.settings-toggle-feed-visible(i); }
+                remove-feed(i) => { root.settings-remove-feed(i); }
+                add-feed => { root.settings-add-feed(); }
+                update-feed(i, name, url, color) => { root.settings-update-feed(i, name, url, color); }
+                select-preset(i) => { root.settings-select-preset(i); }
+                toggle-preset-visible(i) => { root.settings-toggle-preset-visible(i); }
+                set-default-preset(i) => { root.settings-set-default-preset(i); }
+                add-preset => { root.settings-add-preset(); }
+                remove-preset(i) => { root.settings-remove-preset(i); }
+                reset-preset(i) => { root.settings-reset-preset(i); }
+                set-preset-name(n) => { root.settings-set-preset-name(n); }
+                set-preset-unit(i) => { root.settings-set-preset-unit(i); }
+                set-preset-count(i) => { root.settings-set-preset-count(i); }
+                set-preset-anchor(i) => { root.settings-set-preset-anchor(i); }
+                set-preset-day-start(i) => { root.settings-set-preset-day-start(i); }
+                set-preset-day-end(i) => { root.settings-set-preset-day-end(i); }
+                set-preset-day-interval(i) => { root.settings-set-preset-day-interval(i); }
+                set-preset-weekday(i, on) => { root.settings-set-preset-weekday(i, on); }
+                set-preset-month-weeks(n) => { root.settings-set-preset-month-weeks(n); }
+                set-preset-month-from-week(on) => { root.settings-set-preset-month-from-week(on); }
+                set-week-start(i) => { root.settings-set-week-start(i); }
+                set-datetime-format(i) => { root.settings-set-datetime-format(i); }
+                set-font-family(i) => { root.settings-set-font-family(i); }
+                set-font-scale(i) => { root.settings-set-font-scale(i); }
+                set-modal-show-time(v) => { root.settings-set-modal-show-time(v); }
+                set-modal-show-title(v) => { root.settings-set-modal-show-title(v); }
+                set-modal-show-calendar(v) => { root.settings-set-modal-show-calendar(v); }
+                set-modal-show-description(v) => { root.settings-set-modal-show-description(v); }
+                set-dim-past(v) => { root.settings-set-dim-past(v); }
+                set-shade-weekends(v) => { root.settings-set-shade-weekends(v); }
+                add-custom-field => { root.settings-add-custom-field(); }
+                remove-custom-field(i) => { root.settings-remove-custom-field(i); }
+                set-new-field-type(i) => { root.settings-set-new-field-type(i); }
+                run-setup-again => { root.run-setup-again(); }
+                quit-app => { root.quit-app(); }
+                check-updates => { root.check-updates(); }
+                start-update => { root.start-update(); }
+                restart-app => { root.restart-app(); }
+            }
         }
-    }
-
-    // Top-left maintenance exit: hold ~1.5s equivalent via repeated presses in settings;
-    // also a small invisible corner that opens settings then quit.
-    TouchArea {
-        x: 0; y: 0; width: 24px; height: 24px;
-        clicked => { root.open-settings(); }
     }
 }

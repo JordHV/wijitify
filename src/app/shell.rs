@@ -1,8 +1,11 @@
+/// Settings tab for the shell: version, exit, and installed modules.
+/// Slint `SettingsOverlay` uses the same index for the Wijitify page.
+pub const WIJITIFY_SETTINGS_PAGE: i32 = 9;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Setup = 0,
     Home = 1,
-    Settings = 2,
 }
 
 impl Screen {
@@ -15,6 +18,8 @@ impl Screen {
 pub struct ShellState {
     pub screen: Screen,
     pub active_module: String,
+    pub settings_open: bool,
+    pub settings_page: i32,
 }
 
 impl Default for ShellState {
@@ -22,6 +27,8 @@ impl Default for ShellState {
         Self {
             screen: Screen::Setup,
             active_module: "zalender".into(),
+            settings_open: false,
+            settings_page: 0,
         }
     }
 }

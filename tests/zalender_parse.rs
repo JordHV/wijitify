@@ -19,12 +19,15 @@ fn snapshot_indexes_days() {
     let start = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
     let events = vec![model::CalEvent {
         uid: "1".into(),
+        recurrence_id: None,
         title: "Test".into(),
         start,
         end: start + Duration::days(1),
         all_day: true,
+        feed_id: "feed-1".into(),
         feed_name: "f".into(),
         color: "#3b82f6".into(),
+        description: String::new(),
     }];
     let from = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
     let to = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
@@ -47,12 +50,15 @@ fn month_grid_and_snapshot_survive_concurrent_refresh() {
         let events = (0..n * 20)
             .map(|i| model::CalEvent {
                 uid: i.to_string(),
+                recurrence_id: None,
                 title: "e".into(),
                 start: start + Duration::days(i % 300),
                 end: start + Duration::days(i % 300) + Duration::hours(1),
                 all_day: false,
+                feed_id: "feed-1".into(),
                 feed_name: "f".into(),
                 color: "#3b82f6".into(),
+                description: String::new(),
             })
             .collect();
         Arc::new(model::CalendarSnapshot::from_events(events, from, to))
@@ -80,7 +86,8 @@ fn month_grid_and_snapshot_survive_concurrent_refresh() {
                 while !done.load(Ordering::Acquire) {
                     let snap = current.read().unwrap().clone();
                     for month in 1..=12 {
-                        let cells = model::month_grid(2026, month, today);
+                        // Sunday-first (chrono Monday-based index 6).
+                        let cells = model::month_grid(2026, month, today, 6);
                         assert_eq!(cells.len(), 42);
                         for (d, _, _) in cells {
                             for e in snap.events_on(d) {

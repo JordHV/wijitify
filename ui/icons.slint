@@ -1,0 +1,69 @@
+// Font Awesome 6 Free Solid — single icon source for Wijitify.
+// Font: assets/fonts/fa-solid-900.ttf (SIL OFL 1.1 — see Font-Awesome-LICENSE.txt)
+import "../assets/fonts/fa-solid-900.ttf";
+import { Theme } from "./theme.slint";
+
+export global Icons {
+    out property <string> family: "Font Awesome 6 Free";
+    out property <int> weight: 900;
+
+    // Navigation / chrome
+    out property <string> gear: "\u{f013}";
+    /// Hollow (outline) gear — main-screen menu; pair with IconButton `icon`.
+    out property <image> gear-hollow: @image-url("../assets/icons/gear-outline.svg");
+    /// Sidebar closed — empty left pane. Pair with IconButton `icon`.
+    out property <image> panel-left: @image-url("../assets/icons/panel-left.svg");
+    /// Sidebar open — left pane filled. Pair with IconButton `icon`.
+    out property <image> panel-left-fill: @image-url("../assets/icons/panel-left-fill.svg");
+    out property <string> refresh: "\u{f2f1}";
+    out property <string> chevron-left: "\u{f053}";
+    out property <string> chevron-right: "\u{f054}";
+    out property <string> chevron-up: "\u{f077}";
+    out property <string> chevron-down: "\u{f078}";
+    out property <string> plus: "\u{f067}";
+    out property <string> xmark: "\u{f00d}";
+    out property <string> bars: "\u{f0c9}";
+    out property <string> search: "\u{f002}";
+    out property <string> circle-question: "\u{f059}";
+    out property <string> circle-info: "\u{f05a}";
+
+    // Actions
+    out property <string> pen: "\u{f304}";
+    out property <string> paintbrush: "\u{f1fc}";
+    out property <string> check: "\u{f00c}";
+    out property <string> ban: "\u{f05e}";
+
+    // Event markers (customize picker)
+    out property <string> circle: "\u{f111}";
+    out property <string> star: "\u{f005}";
+    out property <string> flag: "\u{f024}";
+    out property <string> bell: "\u{f0f3}";
+    out property <string> pin: "\u{f08d}";
+}
+
+/// Renders one Font Awesome glyph.
+export component FaIcon inherits Text {
+    in property <string> glyph;
+    in property <length> size: Theme.font-body;
+    in property <color> tone: Theme.text;
+
+    font-family: Icons.family;
+    font-weight: Icons.weight;
+    font-size: root.size;
+    color: root.tone;
+    text: root.glyph;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+}
+
+/// Customize/event icon id → FA glyph (`""` = none, `dot`/`star`/`flag`/`bell`/`pin`).
+export component EventIcon inherits FaIcon {
+    in property <string> id: "";
+    glyph: id == "star" ? Icons.star
+        : id == "flag" ? Icons.flag
+        : id == "bell" ? Icons.bell
+        : id == "pin" ? Icons.pin
+        : id == "dot" ? Icons.circle
+        : id == "" ? Icons.ban
+        : Icons.circle;
+}

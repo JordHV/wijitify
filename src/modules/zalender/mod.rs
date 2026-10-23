@@ -1,9 +1,12 @@
+pub mod local_events;
 pub mod model;
+pub mod overrides;
 mod recur;
 mod source;
+pub mod view;
 
 pub use model::CalendarSnapshot;
-pub use source::{load_from_cache, refresh_feeds};
+pub use source::{load_from_cache, normalize_ics_url, refresh_feeds};
 
 use anyhow::Result;
 

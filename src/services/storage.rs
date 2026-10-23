@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 
+#[derive(Clone)]
 pub struct Paths {
     pub config_dir: PathBuf,
     pub cache_dir: PathBuf,

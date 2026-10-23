@@ -47,6 +47,13 @@ pub async fn refresh_feeds(
     let mut statuses = Vec::new();
 
     for feed in feeds {
+        if feed.local || feed.url.starts_with("local://") {
+            statuses.push(FeedStatus {
+                ok: true,
+                from_cache: true,
+            });
+            continue;
+        }
         match fetch_one(&client, feed, cache_dir, from, to).await {
             Ok((events, status)) => {
                 all_events.extend(events);
@@ -109,6 +116,28 @@ fn save_snapshot(cache_dir: &Path, snap: &CalendarSnapshot) -> Result<()> {
     write_atomic(&cache_dir.join("snapshot.json"), &bytes)
 }
 
+/// Ensure `#` in Google calendar IDs is path data (`%23`), not an HTTP fragment.
+pub fn normalize_ics_url(url: &str) -> Result<String> {
+    let url = url.trim();
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        anyhow::bail!("URL must start with http:// or https://");
+    }
+    // Split off a real fragment only if `#` appears after `?`, otherwise encode all `#`.
+    let (base, query) = match url.split_once('?') {
+        Some((b, q)) => (b.to_string(), Some(q)),
+        None => (url.to_string(), None),
+    };
+    let base = base.replace('#', "%23");
+    Ok(match query {
+        Some(q) => {
+            let q = q.replace('#', "%23");
+            format!("{base}?{q}")
+        }
+        None => base,
+    })
+}
+
 async fn fetch_one(
     client: &reqwest::Client,
     feed: &FeedConfig,
@@ -116,12 +145,13 @@ async fn fetch_one(
     from: chrono::DateTime<Utc>,
     to: chrono::DateTime<Utc>,
 ) -> Result<(Vec<CalEvent>, FeedStatus)> {
+    let url = normalize_ics_url(&feed.url)?;
     let raw_path = feed_raw_path(cache_dir, feed);
     let meta_path = feed_meta_path(cache_dir, feed);
     let meta: Option<FeedMeta> =
         storage::read_optional(&meta_path)?.and_then(|b| serde_json::from_slice(&b).ok());
 
-    let mut req = client.get(&feed.url);
+    let mut req = client.get(&url);
     if let Some(m) = &meta {
         if let Some(etag) = &m.etag {
             req = req.header(reqwest::header::IF_NONE_MATCH, etag);
@@ -201,7 +231,7 @@ fn feed_meta_path(cache_dir: &Path, feed: &FeedConfig) -> PathBuf {
     cache_dir.join(format!("{}.meta.json", feed_key(feed)))
 }
 
-fn parse_ics(
+pub fn parse_ics(
     body: &str,
     feed: &FeedConfig,
     from: chrono::DateTime<Utc>,
@@ -221,7 +251,8 @@ fn parse_ics(
         let uid = ev
             .get_uid()
             .map(str::to_string)
-            .unwrap_or_else(|| format!("{}-{}", feed.name, title));
+            .unwrap_or_else(|| format!("{}-{}", feed.id, title));
+        let description = ev.get_description().unwrap_or("").to_string();
 
         let Some(start_dpt) = ev.get_start() else {
             continue;
@@ -249,24 +280,30 @@ fn parse_ics(
                     continue;
                 }
                 out.push(CalEvent {
-                    uid: format!("{uid}-{}", occ.timestamp()),
+                    uid: uid.clone(),
+                    recurrence_id: Some(occ.format("%Y%m%dT%H%M%SZ").to_string()),
                     title: title.clone(),
                     start: occ,
                     end: occ + duration,
                     all_day,
+                    feed_id: feed.id.clone(),
                     feed_name: feed.name.clone(),
                     color: feed.color.clone(),
+                    description: description.clone(),
                 });
             }
         } else if end >= from && start <= to {
             out.push(CalEvent {
                 uid,
+                recurrence_id: None,
                 title,
                 start,
                 end,
                 all_day,
+                feed_id: feed.id.clone(),
                 feed_name: feed.name.clone(),
                 color: feed.color.clone(),
+                description,
             });
         }
     }
@@ -342,5 +379,53 @@ fn parse_ics_timestamp(s: &str) -> Option<i64> {
         Some(Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0)?).timestamp())
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn normalize_encodes_hash_in_path() {
+        let u = normalize_ics_url(
+            "https://calendar.google.com/calendar/ical/en.usa#holiday@group.v.calendar.google.com/public/basic.ics",
+        )
+        .unwrap();
+        assert!(u.contains("%23holiday"));
+        assert!(!u.contains("#holiday"));
+    }
+
+    #[test]
+    fn normalize_keeps_already_encoded() {
+        let u = normalize_ics_url(
+            "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics",
+        )
+        .unwrap();
+        assert!(u.contains("%23holiday"));
+    }
+
+    #[test]
+    fn parse_google_style_all_day_date() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n\
+            DTSTART;VALUE=DATE:20260119\r\nDTEND;VALUE=DATE:20260120\r\n\
+            SUMMARY:Martin Luther King Jr. Day\r\nUID:mlk@test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let feed = FeedConfig {
+            id: "feed-1".into(),
+            name: "US Holidays".into(),
+            url: "https://example.com/basic.ics".into(),
+            color: "#ef4444".into(),
+            visible: true,
+            writable: false,
+            local: false,
+        };
+        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 12, 31, 23, 59, 59).unwrap();
+        let events = parse_ics(body, &feed, from, to).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].all_day);
+        assert_eq!(events[0].title, "Martin Luther King Jr. Day");
+        assert_eq!(events[0].color, "#ef4444");
     }
 }

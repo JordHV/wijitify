@@ -1,5 +1,9 @@
 import { Theme } from "../theme.slint";
-import { NavButton } from "./nav.slint";
+import { Icons, FaIcon } from "../icons.slint";
+import {
+    Button, IconButton, InfoTip, Row, Banner, Switch, Dropdown, Field, LongField,
+    SettingRow, SettingsDivider, ShortInput, ColorBox
+} from "./kit.slint";
 
 export struct ModuleToggleRow {
     id: string,
@@ -8,13 +12,364 @@ export struct ModuleToggleRow {
     enabled: bool,
 }
 
-export component SettingsView inherits Rectangle {
-    background: Theme.bg;
+export struct SettingsFeedRow {
+    id: string,
+    name: string,
+    url: string,
+    color: color,
+    color-hex: string,
+    visible: bool,
+    writable: bool,
+    local: bool,
+}
+
+export struct SettingsFieldDefRow {
+    id: string,
+    name: string,
+    type-label: string,
+}
+
+export struct ThemeColorRow {
+    id: string,
+    label: string,
+    hex: string,
+    swatch: color,
+    tip: string,
+}
+
+export struct SettingsPresetRow {
+    id: string,
+    name: string,
+    summary: string,
+    visible: bool,
+    builtin: bool,
+    selected: bool,
+    is-hot: bool,
+}
+
+export struct WeekdayCheck {
+    label: string,
+    /// Sunday = 0 … Saturday = 6.
+    index: int,
+    on: bool,
+}
+
+/// Fixed column for Default / Show header + switches (same width on every row).
+component PresetCol inherits HorizontalLayout {
+    min-width: 72px;
+    max-width: 72px;
+    preferred-width: 72px;
+    alignment: center;
+    cross-axis-alignment: center;
+    @children
+}
+
+/// Collapsed: name · visible · type · remove. Expand to edit name, URL, and color.
+component CalendarFeedCard inherits Rectangle {
+    in property <string> name: "";
+    in property <string> url: "";
+    in property <string> color-hex: "#3b82f6";
+    in property <color> feed-color: Theme.accent;
+    in property <bool> feed-visible: true;
+    in property <bool> writable: false;
+    in property <bool> local: false;
+    in-out property <bool> expanded: false;
+
+    // Drafts follow the feed until the user types, then stay put until the next save.
+    property <string> draft-name: root.name;
+    property <string> draft-url: root.url;
+    property <string> draft-color: root.color-hex;
+    changed name => { root.draft-name = root.name; }
+    changed url => { root.draft-url = root.url; }
+    changed color-hex => { root.draft-color = root.color-hex; }
+
+    callback toggle-visible();
+    callback remove();
+    callback commit(string, string, string);
+
+    function save() {
+        root.commit(root.draft-name, root.draft-url, root.draft-color);
+    }
+
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.surface-press;
+
+    VerticalLayout {
+        padding: Theme.pad-sm;
+        spacing: Theme.pad-sm;
+
+        // Summary row
+        HorizontalLayout {
+            spacing: Theme.pad-sm;
+            alignment: stretch;
+            cross-axis-alignment: center;
+
+            TouchArea {
+                width: Theme.touch-min;
+                height: Theme.touch-min;
+                clicked => { root.expanded = !root.expanded; }
+                FaIcon {
+                    glyph: root.expanded ? Icons.chevron-down : Icons.chevron-right;
+                    size: 14px;
+                    tone: Theme.muted;
+                    width: 100%;
+                    height: 100%;
+                }
+            }
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                background: root.feed-color;
+                border-width: 1px;
+                border-color: Theme.surface-press;
+            }
+            Text {
+                text: root.name;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                font-weight: 600;
+                vertical-alignment: center;
+                horizontal-alignment: left;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            Switch {
+                checked: root.feed-visible;
+                tip: "When off, this calendar’s events are hidden from all views without removing the feed.";
+                toggled => { root.toggle-visible(); }
+            }
+            Text {
+                text: root.local ? "Local" : (root.writable ? "Writable" : "ICS");
+                color: Theme.muted;
+                font-size: Theme.font-caption;
+                vertical-alignment: center;
+                min-width: 72px;
+            }
+            if !root.local: Button {
+                label: "Remove";
+                role: "danger";
+                activate => { root.remove(); }
+            }
+        }
+
+        if root.expanded: VerticalLayout {
+            spacing: Theme.pad-sm;
+            Rectangle { height: 1px; background: Theme.surface-2; }
+            SettingRow {
+                label: "Name";
+                tip: root.local
+                    ? "Name of your on-device calendar. Used when creating events. Not shared."
+                    : "Display name in the sidebar and on events. Applies when you leave the field.";
+                ShortInput {
+                    box-width: 240px;
+                    text <=> root.draft-name;
+                    edited => { root.save(); }
+                }
+            }
+            if !root.local: SettingRow {
+                label: "ICS URL";
+                tip: "Public HTTPS link. A new address is refreshed in the background after you leave the field.";
+                ShortInput {
+                    box-width: 420px;
+                    text <=> root.draft-url;
+                    edited => { root.save(); }
+                }
+            }
+            SettingRow {
+                label: "Color";
+                tip: "Color for this calendar’s events and sidebar checkbox.";
+                ColorBox {
+                    value: root.feed-color;
+                    picked(hex) => {
+                        root.draft-color = hex;
+                        root.save();
+                    }
+                }
+            }
+            Text {
+                text: root.local
+                    ? "Local calendar — on this device only. Cannot be shared or removed. Pick Default in the sidebar to choose where new events are created."
+                    : (root.writable
+                        ? "Writable source — Edit is available on events when supported."
+                        : "Read-only ICS — per-event Customize still overrides this color.");
+                color: Theme.muted;
+                font-size: Theme.font-caption;
+                wrap: word-wrap;
+                            min-width: 0px;
+                horizontal-alignment: left;
+            }
+        }
+    }
+}
+
+/// Blank add row: expand to enter name / URL / color; blue Add instead of Remove.
+component CalendarAddCard inherits Rectangle {
+    in-out property <string> new-name: "";
+    in-out property <string> new-url: "";
+    in-out property <string> new-color: "#3b82f6";
+    in-out property <bool> expanded: false;
+
+    callback add();
+
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.surface-press;
+
+    VerticalLayout {
+        padding: Theme.pad-sm;
+        spacing: Theme.pad-sm;
+
+        HorizontalLayout {
+            spacing: Theme.pad-sm;
+            alignment: stretch;
+            cross-axis-alignment: center;
+
+            TouchArea {
+                width: Theme.touch-min;
+                height: Theme.touch-min;
+                clicked => { root.expanded = !root.expanded; }
+                FaIcon {
+                    glyph: root.expanded ? Icons.chevron-down : Icons.chevron-right;
+                    size: 14px;
+                    tone: Theme.muted;
+                    width: 100%;
+                    height: 100%;
+                }
+            }
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Theme.surface-press;
+                background: transparent;
+            }
+            Text {
+                text: root.new-name == "" ? "New calendar" : root.new-name;
+                color: root.new-name == "" ? Theme.muted : Theme.text;
+                font-size: Theme.font-body;
+                font-weight: 600;
+                font-italic: root.new-name == "";
+                vertical-alignment: center;
+                horizontal-alignment: left;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            // Spacer matching visible switch + type columns on feed rows
+            Rectangle { min-width: 56px; max-width: 56px; height: 1px; }
+            Text {
+                text: "";
+                min-width: 72px;
+            }
+            Button {
+                label: "Add calendar";
+                role: "primary";
+                activate => { root.add(); }
+            }
+        }
+
+        if root.expanded: VerticalLayout {
+            spacing: Theme.pad-sm;
+            Rectangle { height: 1px; background: Theme.surface-2; }
+            SettingRow {
+                label: "Name";
+                tip: "Display name in the sidebar and on events.";
+                ShortInput {
+                    box-width: 240px;
+                    text <=> root.new-name;
+                }
+            }
+            SettingRow {
+                label: "ICS URL";
+                tip: "Public HTTPS link to an .ics calendar.";
+                ShortInput {
+                    box-width: 420px;
+                    text <=> root.new-url;
+                }
+            }
+            SettingRow {
+                label: "Color";
+                tip: "Color for this calendar’s events and checkbox.";
+                ColorBox {
+                    picked(hex) => { root.new-color = hex; }
+                }
+            }
+        }
+    }
+}
+
+export component SettingsOverlay inherits Rectangle {
+    // Transparent root; dims behind panels.
+    background: transparent;
+
+    in property <int> page: 0;
+    in property <[string]> page-names;
+    /// Indexes into `page-names`. Only Wijitify when every module is off.
+    in property <[int]> visible-pages;
+    /// Must match `WIJITIFY_SETTINGS_PAGE` in the shell.
+    property <int> wijitify-page: 9;
 
     in property <[ModuleToggleRow]> modules;
-    in property <string> perf-overlay: "";
+    in property <bool> theme-is-dark: true;
+    in property <[ThemeColorRow]> theme-colors;
+    in property <string> theme-banner: "";
+    in property <int> theme-banner-kind: 0;
 
-    // Updates: 0 unsupported, 1 up-to-date, 2 available, 3 installing, 4 ready, 5 failed
+    in property <[SettingsFeedRow]> feeds;
+    in-out property <string> new-feed-name: "";
+    in-out property <string> new-feed-url: "";
+    in-out property <string> new-feed-color: "#3b82f6";
+
+    in property <[SettingsPresetRow]> presets;
+    in property <bool> preset-selected: false;
+    in property <bool> preset-is-builtin: false;
+    in property <int> preset-index: 0;
+    in-out property <string> preset-name: "";
+    in property <int> preset-unit: 2;
+    in property <int> preset-count: 1;
+    in property <int> preset-anchor: 0;
+    in property <int> preset-day-start-hour: 6;
+    in property <int> preset-day-end-hour: 21;
+    /// Index into interval-options: 0=15m, 1=30m, 2=1h, 3=2h
+    in property <int> preset-day-interval: 2;
+    in property <[WeekdayCheck]> preset-weekdays;
+    in property <int> preset-month-weeks: 6;
+    in property <bool> preset-month-from-week: false;
+    in property <[string]> week-count-options;
+    in property <[string]> unit-options;
+    in property <[string]> count-options;
+    in property <[string]> anchor-options;
+    in property <[string]> hour-options;
+    in property <[string]> interval-options;
+
+    in property <int> week-start: 0;
+    in property <[string]> week-start-options;
+    in property <int> datetime-format: 0;
+    in property <[string]> datetime-options;
+    in property <int> font-family: 0;
+    in property <[string]> font-family-options;
+    in property <int> font-scale: 1;
+    in property <[string]> font-scale-options;
+
+    in property <bool> modal-show-time: true;
+    in property <bool> modal-show-title: true;
+    in property <bool> modal-show-calendar: true;
+    in property <bool> modal-show-description: true;
+    in property <bool> dim-past: true;
+    in property <bool> shade-weekends: true;
+
+    in property <[SettingsFieldDefRow]> custom-field-defs;
+    in-out property <string> new-field-name: "";
+    in property <int> new-field-type: 0;
+    in property <[string]> field-type-options;
+
+    in property <string> help-text: "";
+
+    in property <string> perf-overlay: "";
     in property <string> current-version: "";
     in property <int> update-status: 0;
     in property <string> update-version: "";
@@ -23,135 +378,1102 @@ export component SettingsView inherits Rectangle {
     in property <string> update-error: "";
     in property <string> update-checked: "";
 
+    callback select-page(int);
+    callback close-settings();
     callback toggle-module(int);
+    callback set-theme(int);
+    callback set-theme-color(int, string);
+    /// Restore standard Light/Dark palette for the current theme mode.
+    callback reset-theme-colors();
+    callback toggle-feed-visible(int);
+    callback remove-feed(int);
+    callback add-feed();
+    callback update-feed(int, string, string, string);
+
+    in property <string> feed-banner: "";
+    in property <int> feed-banner-kind: 0;
+    callback select-preset(int);
+    callback toggle-preset-visible(int);
+    /// Mutually exclusive default preset (dashboard Default button + startup).
+    callback set-default-preset(int);
+    callback add-preset();
+    callback remove-preset(int);
+    callback reset-preset(int);
+    callback set-preset-name(string);
+    callback set-preset-unit(int);
+    callback set-preset-count(int);
+    callback set-preset-anchor(int);
+    callback set-preset-day-start(int);
+    callback set-preset-day-end(int);
+    callback set-preset-day-interval(int);
+    callback set-preset-weekday(int, bool);
+    callback set-preset-month-weeks(int);
+    callback set-preset-month-from-week(bool);
+    callback set-week-start(int);
+    callback set-datetime-format(int);
+    callback set-font-family(int);
+    callback set-font-scale(int);
+    callback set-modal-show-time(bool);
+    callback set-modal-show-title(bool);
+    callback set-modal-show-calendar(bool);
+    callback set-modal-show-description(bool);
+    callback set-dim-past(bool);
+    callback set-shade-weekends(bool);
+    callback add-custom-field();
+    callback remove-custom-field(int);
+    callback set-new-field-type(int);
     callback run-setup-again();
     callback quit-app();
-    callback close-settings();
     callback check-updates();
     callback start-update();
     callback restart-app();
 
-    VerticalLayout {
-        padding: Theme.pad;
-        spacing: Theme.pad;
+    // Short tabs look empty if the body stays scrolled from a longer tab.
+    in-out property <length> body-scroll: 0px;
+    /// Edit-preset modal (Preset views).
+    property <bool> preset-edit-open: false;
+    changed page => {
+        root.body-scroll = 0px;
+        root.preset-edit-open = false;
+    }
 
-        HorizontalLayout {
-            Text {
-                text: "Settings";
-                color: Theme.text;
-                font-size: 28px;
-                font-weight: 700;
-                horizontal-stretch: 1;
-            }
-            NavButton { label: "Close"; activate => { root.close-settings(); } }
+    function go-page(i: int) {
+        root.body-scroll = 0px;
+        root.preset-edit-open = false;
+        root.select-page(i);
+    }
+
+    function open-preset-edit(i: int) {
+        root.select-preset(i);
+        root.preset-edit-open = true;
+    }
+
+    function close-preset-edit() {
+        root.preset-edit-open = false;
+    }
+
+    // Dim + swallow clicks; only Close dismisses the menu.
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { }
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Theme.dim;
         }
+    }
 
-        Text { text: "Modules"; color: Theme.muted; font-size: 14px; }
+    // Right detail panel ~75%
+    Rectangle {
+        x: parent.width * 0.25 + Theme.pad;
+        y: Theme.pad;
+        width: parent.width * 0.75 - 2 * Theme.pad;
+        height: parent.height - 2 * Theme.pad;
+        background: Theme.bg;
+        border-radius: Theme.radius;
+        z: 2;
 
-        for m[i] in modules: ta := TouchArea {
-            min-height: Theme.touch-min;
-            clicked => { root.toggle-module(i); }
-            Rectangle {
-                background: ta.pressed ? Theme.surface-2 : Theme.surface;
-                border-radius: 10px;
-                HorizontalLayout {
-                    padding: Theme.pad;
-                    spacing: Theme.pad;
-                    Rectangle {
-                        width: 28px; height: 28px; border-radius: 6px;
-                        border-width: 2px; border-color: Theme.accent;
-                        background: m.enabled ? Theme.accent : transparent;
+        VerticalLayout {
+            width: 100%;
+            height: 100%;
+            padding: Theme.pad;
+            spacing: Theme.pad-sm;
+
+            Text {
+                text: page < page-names.length ? page-names[page] : "Settings";
+                color: Theme.text;
+                font-size: Theme.font-title;
+                font-weight: 700;
+                horizontal-alignment: left;
+            }
+
+            // Wijitify uses its own Flickable so a scrolled long tab cannot blank it.
+            if page == root.wijitify-page: Flickable {
+                vertical-stretch: 1;
+                min-width: 0px;
+                // Viewport width, not the parent — parent includes padding and grows with content.
+                content-width: self.width;
+
+                VerticalLayout {
+                    width: parent.width;
+                    min-width: 0px;
+                    spacing: 0;
+                    alignment: start;
+
+                    SettingRow {
+                        label: "Version";
+                        tip: "Installed app version. On Linux Flatpak, Check now looks for updates from the release feed.";
+                        Text {
+                            text: "Wijitify " + (root.current-version == "" ? "…" : root.current-version);
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
                     }
-                    VerticalLayout {
-                        spacing: 4px;
-                        Text { text: m.name; color: Theme.text; font-size: 18px; }
-                        Text { text: m.description; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                    SettingsDivider {}
+                    Rectangle {
+                        background: Theme.surface;
+                        border-radius: Theme.radius;
+                        VerticalLayout {
+                            padding: Theme.pad;
+                            spacing: Theme.pad-sm;
+                            if update-status == 0: Banner {
+                                message: "In-app updates require Flatpak (Linux)";
+                                kind: 0;
+                            }
+                            if update-status == 1: Banner {
+                                message: root.update-checked == "" ? "Up to date" : "Up to date · checked " + root.update-checked;
+                                kind: 0;
+                            }
+                            if update-status == 2: VerticalLayout {
+                                spacing: 4px;
+                                Banner {
+                                    message: "Update available: v" + root.update-version;
+                                    kind: 1;
+                                }
+                                if update-notes != "": Text {
+                                    text: root.update-notes;
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                    wrap: word-wrap;
+                                    min-width: 0px;
+                                }
+                            }
+                            if update-status == 3: Banner {
+                                message: "Installing… " + root.update-percent + "%";
+                                kind: 2;
+                            }
+                            if update-status == 4: Banner {
+                                message: "Update installed — restart to use it";
+                                kind: 1;
+                            }
+                            if update-status == 5: Banner {
+                                message: root.update-error;
+                                kind: 3;
+                            }
+                            HorizontalLayout {
+                                spacing: Theme.pad-sm;
+                                alignment: start;
+                                if update-status == 0 || update-status == 1 || update-status == 5: Button {
+                                    label: update-status == 5 ? "Retry" : "Check now";
+                                    role: "secondary";
+                                    activate => { root.check-updates(); }
+                                }
+                                if update-status == 2: Button {
+                                    label: "Update to new version";
+                                    role: "primary";
+                                    activate => { root.start-update(); }
+                                }
+                                if update-status == 4: Button {
+                                    label: "Restart now";
+                                    role: "primary";
+                                    activate => { root.restart-app(); }
+                                }
+                                InfoTip {
+                                    text: "Update actions use the Flatpak portal on Linux. Restart loads the newly installed version.";
+                                }
+                            }
+                        }
+                    }
+                    SettingsDivider {}
+                    SettingRow {
+                        label: "Return to desktop";
+                        tip: "Exits Wijitify completely. Unsaved UI state is already persisted via debounced config saves.";
+                        Button {
+                            label: "Exit";
+                            role: "danger";
+                            activate => { root.quit-app(); }
+                        }
+                    }
+                    SettingsDivider {}
+                    SettingRow {
+                        label: "Run setup again";
+                        tip: "Re-opens first-run setup to pick modules and feeds. Existing config can be revised; finish to save.";
+                        Button {
+                            label: "Run setup";
+                            role: "secondary";
+                            activate => { root.run-setup-again(); }
+                        }
+                    }
+                    for m[i] in modules: VerticalLayout {
+                        spacing: 0;
+                        width: 100%;
+                        SettingsDivider {}
+                        SettingRow {
+                            label: m.name;
+                            tip: m.description;
+                            Switch {
+                                checked: m.enabled;
+                                toggled => { root.toggle-module(i); }
+                            }
+                        }
+                    }
+                    if perf-overlay != "": Text {
+                        text: root.perf-overlay;
+                        color: Theme.ok;
+                        font-size: 12px;
+                        font-family: "monospace";
+                    }
+                }
+            }
+
+            if page != root.wijitify-page: Flickable {
+                vertical-stretch: 1;
+                min-width: 0px;
+                content-width: self.width;
+                content-y <=> root.body-scroll;
+
+                VerticalLayout {
+                    width: parent.width;
+                    min-width: 0px;
+                    spacing: Theme.pad;
+                    alignment: start;
+
+                    // Calendars — collapsed rows; expand for details; blank add row at bottom
+                    if page == 0: VerticalLayout {
+                        spacing: Theme.pad-sm;
+                        alignment: start;
+
+                        Banner {
+                            message: root.feed-banner;
+                            kind: root.feed-banner-kind;
+                        }
+
+                        for f[i] in feeds: CalendarFeedCard {
+                            name: f.name;
+                            url: f.url;
+                            color-hex: f.color-hex;
+                            feed-color: f.color;
+                            feed-visible: f.visible;
+                            writable: f.writable;
+                            local: f.local;
+                            toggle-visible => { root.toggle-feed-visible(i); }
+                            remove => { root.remove-feed(i); }
+                            commit(name, url, color) => { root.update-feed(i, name, url, color); }
+                        }
+
+                        CalendarAddCard {
+                            new-name <=> root.new-feed-name;
+                            new-url <=> root.new-feed-url;
+                            new-color <=> root.new-feed-color;
+                            add => { root.add-feed(); }
+                        }
+                    }
+
+                    // Global — typography, date/time, display that applies to all views
+                    if page == 1: VerticalLayout {
+                        spacing: Theme.pad-sm;
+                        alignment: start;
+                        Text {
+                            text: "Applies across the shell and every module view.";
+                            color: Theme.muted;
+                            font-size: Theme.font-caption;
+                            wrap: word-wrap;
+                            min-width: 0px;
+                        }
+                        VerticalLayout {
+                            spacing: 0;
+                            width: 100%;
+                            Dropdown {
+                                inline: true;
+                                caption: "Font";
+                                tip: "Typeface used for dashboard text. System default uses the OS UI font.";
+                                options: root.font-family-options;
+                                selected: root.font-family;
+                                changed(i) => { root.set-font-family(i); }
+                            }
+                            SettingsDivider {}
+                            Dropdown {
+                                inline: true;
+                                caption: "Font size";
+                                tip: "Scales titles, body text, captions, clock, and event chips together.";
+                                options: root.font-scale-options;
+                                selected: root.font-scale;
+                                changed(i) => { root.set-font-scale(i); }
+                            }
+                            SettingsDivider {}
+                            Dropdown {
+                                inline: true;
+                                caption: "Date and time format";
+                                tip: "Format for the clock under the sidebar month title. Does not change how event times are stored.";
+                                options: root.datetime-options;
+                                selected: root.datetime-format;
+                                changed(i) => { root.set-datetime-format(i); }
+                            }
+                            SettingsDivider {}
+                            Dropdown {
+                                inline: true;
+                                caption: "Week starts on";
+                                tip: "First column of week and month grids. Global for all presets.";
+                                options: root.week-start-options;
+                                selected: root.week-start;
+                                changed(i) => { root.set-week-start(i); }
+                            }
+                            SettingsDivider {}
+                            SettingRow {
+                                label: "Dim past days";
+                                tip: "Fade days before today on calendar grids so upcoming days stand out.";
+                                Switch {
+                                    checked: root.dim-past;
+                                    toggled => { root.set-dim-past(self.checked); }
+                                }
+                            }
+                            SettingsDivider {}
+                            SettingRow {
+                                label: "Shade weekends";
+                                tip: "Light background on Saturday and Sunday columns for easier scanning.";
+                                Switch {
+                                    checked: root.shade-weekends;
+                                    toggled => { root.set-shade-weekends(self.checked); }
+                                }
+                            }
+                        }
+                    }
+
+                    // Theme
+                    if page == 2: VerticalLayout {
+                        spacing: Theme.pad-sm;
+                        VerticalLayout {
+                            spacing: 0;
+                            width: 100%;
+                            SettingRow {
+                                label: "Reset colors";
+                                tip: "Restores the standard Light or Dark palette for the theme currently selected below. Custom component colors are discarded.";
+                                Button {
+                                    label: "Reset to default";
+                                    role: "secondary";
+                                    activate => { root.reset-theme-colors(); }
+                                }
+                            }
+                            SettingsDivider {}
+                            SettingRow {
+                                label: "Theme";
+                                tip: "Choosing Dark or Light loads that theme’s default colors below. You can then tweak each component color individually.";
+                                HorizontalLayout {
+                                    spacing: Theme.pad-sm;
+                                    alignment: end;
+                                    Button {
+                                        label: "Light";
+                                        role: !root.theme-is-dark ? "primary" : "secondary";
+                                        activate => { root.set-theme(0); }
+                                    }
+                                    Button {
+                                        label: "Dark";
+                                        role: root.theme-is-dark ? "primary" : "secondary";
+                                        activate => { root.set-theme(1); }
+                                    }
+                                }
+                            }
+                        }
+                        Banner {
+                            message: root.theme-banner;
+                            kind: root.theme-banner-kind;
+                        }
+                        Text {
+                            text: "Component colors";
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            font-weight: 600;
+                        }
+                        Text {
+                            text: "Defaults come from the selected theme. Tap a color box to choose another.";
+                            color: Theme.muted;
+                            font-size: Theme.font-caption;
+                            wrap: word-wrap;
+                            min-width: 0px;
+                        }
+                        VerticalLayout {
+                            spacing: 0;
+                            width: 100%;
+                            for c[i] in theme-colors: VerticalLayout {
+                                spacing: 0;
+                                width: 100%;
+                                if i > 0: SettingsDivider {}
+                                SettingRow {
+                                    label: c.label;
+                                    tip: c.tip;
+                                    ColorBox {
+                                        value: c.swatch;
+                                        picked(hex) => { root.set-theme-color(i, hex); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Preset views — list only; edit opens a modal
+                    if page == 3: VerticalLayout {
+                        spacing: Theme.pad-sm;
+                        Text {
+                            text: "Built-in and custom views. Default is the dashboard Default button (today + that preset). Show puts a preset in the view pill. Edit opens that preset’s options.";
+                            color: Theme.muted;
+                            font-size: Theme.font-caption;
+                            wrap: word-wrap;
+                            min-width: 0px;
+                        }
+                        VerticalLayout {
+                            spacing: Theme.pad-sm;
+                            width: 100%;
+
+                            // One header row — Default / Show sit above the switch columns.
+                            HorizontalLayout {
+                                spacing: Theme.pad-sm;
+                                alignment: stretch;
+                                cross-axis-alignment: center;
+                                Text {
+                                    text: "Preset";
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: left;
+                                    horizontal-stretch: 1;
+                                }
+                                PresetCol {
+                                    Text {
+                                        text: "Default";
+                                        color: Theme.muted;
+                                        font-size: Theme.font-caption;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                                PresetCol {
+                                    Text {
+                                        text: "Show";
+                                        color: Theme.muted;
+                                        font-size: Theme.font-caption;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                                Rectangle {
+                                    min-width: 72px;
+                                    preferred-width: 72px;
+                                    max-width: 72px;
+                                }
+                                Rectangle {
+                                    min-width: 96px;
+                                    preferred-width: 96px;
+                                    max-width: 96px;
+                                }
+                            }
+
+                            for p[i] in presets: HorizontalLayout {
+                                spacing: Theme.pad-sm;
+                                alignment: stretch;
+                                cross-axis-alignment: center;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    min-width: 0px;
+                                    min-height: Theme.touch-min;
+                                    background: Theme.surface;
+                                    border-radius: Theme.radius;
+                                    HorizontalLayout {
+                                        padding-left: Theme.pad-sm;
+                                        padding-right: Theme.pad-sm;
+                                        spacing: Theme.pad-sm;
+                                        alignment: start;
+                                        cross-axis-alignment: center;
+                                        Text {
+                                            text: p.name + (p.is-hot ? "  · default" : "");
+                                            color: Theme.text;
+                                            font-size: Theme.font-body;
+                                            font-weight: 600;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: left;
+                                            min-width: 0px;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: p.summary;
+                                            color: Theme.muted;
+                                            font-size: Theme.font-caption;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: left;
+                                            min-width: 0px;
+                                            horizontal-stretch: 1;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                                PresetCol {
+                                    Switch {
+                                        checked: p.is-hot;
+                                        toggled => { root.set-default-preset(i); }
+                                    }
+                                }
+                                PresetCol {
+                                    Switch {
+                                        checked: p.visible;
+                                        toggled => { root.toggle-preset-visible(i); }
+                                    }
+                                }
+                                Button {
+                                    label: "Edit";
+                                    role: "secondary";
+                                    min-width: 72px;
+                                    preferred-width: 72px;
+                                    max-width: 72px;
+                                    activate => { root.open-preset-edit(i); }
+                                }
+                                // Same width for Reset / Delete so columns stay aligned with or without customs.
+                                if p.builtin: Button {
+                                    label: "Reset";
+                                    role: "secondary";
+                                    min-width: 96px;
+                                    preferred-width: 96px;
+                                    max-width: 96px;
+                                    activate => { root.reset-preset(i); }
+                                }
+                                if !p.builtin: Button {
+                                    label: "Delete";
+                                    role: "danger";
+                                    min-width: 96px;
+                                    preferred-width: 96px;
+                                    max-width: 96px;
+                                    activate => { root.remove-preset(i); }
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: Theme.pad-sm;
+                            alignment: start;
+                            Button {
+                                label: "Add preset";
+                                role: "primary";
+                                activate => {
+                                    root.add-preset();
+                                    root.preset-edit-open = true;
+                                }
+                            }
+                            InfoTip {
+                                text: "Creates a custom preset (copy of Month by default) and opens its editor.";
+                            }
+                        }
+                    }
+
+                    // Calendar display — day modal field visibility
+                    if page == 4: VerticalLayout {
+                        spacing: Theme.pad-sm;
+                        Text {
+                            text: "Fields shown when you open a day or event from the calendar.";
+                            color: Theme.muted;
+                            font-size: Theme.font-caption;
+                            wrap: word-wrap;
+                            min-width: 0px;
+                        }
+                        VerticalLayout {
+                            spacing: 0;
+                            width: 100%;
+                            SettingRow {
+                                label: "Show time";
+                                tip: "Show event start/end time in the day modal and event detail. Off hides times for a cleaner list.";
+                                Switch {
+                                    checked: root.modal-show-time;
+                                    toggled => { root.set-modal-show-time(self.checked); }
+                                }
+                            }
+                            SettingsDivider {}
+                            SettingRow {
+                                label: "Show title";
+                                tip: "Show the event title in the day modal. Usually leave on; turn off only for sparse layouts.";
+                                Switch {
+                                    checked: root.modal-show-title;
+                                    toggled => { root.set-modal-show-title(self.checked); }
+                                }
+                            }
+                            SettingsDivider {}
+                            SettingRow {
+                                label: "Show calendar name";
+                                tip: "Show which calendar feed an event belongs to in the day modal and detail sheet.";
+                                Switch {
+                                    checked: root.modal-show-calendar;
+                                    toggled => { root.set-modal-show-calendar(self.checked); }
+                                }
+                            }
+                            SettingsDivider {}
+                            SettingRow {
+                                label: "Show description";
+                                tip: "Show the ICS description body when you open an event. Off keeps the modal to title/time only.";
+                                Switch {
+                                    checked: root.modal-show-description;
+                                    toggled => { root.set-modal-show-description(self.checked); }
+                                }
+                            }
+                        }
+                    }
+
+                    // Custom fields
+                    if page == 5: VerticalLayout {
+                        spacing: Theme.pad-sm;
+                        HorizontalLayout {
+                            spacing: 4px;
+                            alignment: stretch;
+                            cross-axis-alignment: center;
+                            Text {
+                                text: "Definitions only. Values are set per event in Customize.";
+                                color: Theme.muted;
+                                font-size: Theme.font-caption;
+                                wrap: word-wrap;
+                                min-width: 0px;
+                                horizontal-alignment: left;
+                                horizontal-stretch: 1;
+                            }
+                            InfoTip {
+                                text: "Custom fields are labels you define here. Fill values per event via Customize; they stay in local overrides, not the ICS feed.";
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 0;
+                            width: 100%;
+                            for f[i] in custom-field-defs: VerticalLayout {
+                                spacing: 0;
+                                width: 100%;
+                                if i > 0: SettingsDivider {}
+                                SettingRow {
+                                    label: f.name;
+                                    tip: "Field type controls the Customize editor (text, long text, yes/no, or choice). Removing a field hides it; stored values remain until cleared.";
+                                    HorizontalLayout {
+                                        spacing: Theme.pad-sm;
+                                        alignment: center;
+                                        cross-axis-alignment: center;
+                                        Text {
+                                            text: f.type-label;
+                                            color: Theme.text;
+                                            font-size: Theme.font-caption;
+                                            vertical-alignment: center;
+                                        }
+                                        Button {
+                                            label: "Remove";
+                                            role: "danger";
+                                            activate => { root.remove-custom-field(i); }
+                                        }
+                                    }
+                                }
+                            }
+                            if custom-field-defs.length > 0: SettingsDivider {}
+                            SettingRow {
+                                label: "Field name";
+                                tip: "Label shown in Customize and on event summaries. Keep it short.";
+                                ShortInput {
+                                    box-width: 240px;
+                                    text <=> root.new-field-name;
+                                }
+                            }
+                            SettingsDivider {}
+                            Dropdown {
+                                inline: true;
+                                caption: "Type";
+                                tip: "Input control used when editing this field on an event: short text, long text, boolean, or choice list.";
+                                options: root.field-type-options;
+                                selected: root.new-field-type;
+                                changed(i) => { root.set-new-field-type(i); }
+                            }
+                            SettingsDivider {}
+                            SettingRow {
+                                label: "Add field";
+                                tip: "Adds the field definition to config. It appears in Customize for every event after you save.";
+                                Button {
+                                    label: "Add field";
+                                    role: "primary";
+                                    activate => { root.add-custom-field(); }
+                                }
+                            }
+                        }
+                    }
+
+                    // Invites placeholder
+                    if page == 6: VerticalLayout {
+                        spacing: Theme.pad-sm;
+                        HorizontalLayout {
+                            spacing: 4px;
+                            alignment: stretch;
+                            cross-axis-alignment: center;
+                            Text {
+                                text: "ICS feeds are read-only. The Edit button on events stays off until a writable calendar source is connected.";
+                                color: Theme.text;
+                                font-size: Theme.font-body;
+                                wrap: word-wrap;
+                            min-width: 0px;
+                                horizontal-alignment: left;
+                                horizontal-stretch: 1;
+                            }
+                            InfoTip {
+                                text: "Invites and write-back are not available for public ICS. Customize still works for local color, icon, and custom fields.";
+                            }
+                        }
+                    }
+
+                    // Help
+                    if page == 7: VerticalLayout {
+                        spacing: Theme.pad-sm;
+                        HorizontalLayout {
+                            spacing: 4px;
+                            alignment: stretch;
+                            cross-axis-alignment: center;
+                            Text {
+                                text: root.help-text;
+                                color: Theme.text;
+                                font-size: Theme.font-body;
+                                wrap: word-wrap;
+                            min-width: 0px;
+                                horizontal-alignment: left;
+                                horizontal-stretch: 1;
+                            }
+                            InfoTip {
+                                text: "Built-in guide for dashboard layout, views, navigation, calendars, and events. Use ⓘ icons on other tabs for field-specific help.";
+                            }
+                        }
+                    }
+
+                    // About
+                    if page == 8: VerticalLayout {
+                        spacing: Theme.pad;
+                        alignment: start;
+                        Text {
+                            text: "Wijitify is an open-source, full-screen dashboard for a dedicated Linux touchscreen. The app is a shell that hosts modules. Zalender is the calendar: public ICS feeds, day through year views, and an offline cache so the board still works without a network.";
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            wrap: word-wrap;
+                            min-width: 0px;
+                            horizontal-alignment: left;
+                        }
+                        Text {
+                            text: "It is built as a modular monolith: one native app, shared settings, and modules you can turn on or off. Touch targets stay large, and the screen you are looking at is drawn from memory while feeds refresh in the background.";
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            wrap: word-wrap;
+                            min-width: 0px;
+                            horizontal-alignment: left;
+                        }
+                        Text {
+                            text: "Source, issues, and releases:\nhttps://github.com/JordHV/wijitify";
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            wrap: word-wrap;
+                            min-width: 0px;
+                            horizontal-alignment: left;
+                        }
+                        Text {
+                            text: "GPL-3.0-or-later";
+                            color: Theme.muted;
+                            font-size: Theme.font-caption;
+                            horizontal-alignment: left;
+                        }
+                    }
+
+                }
+            }
+        }
+    }
+
+    // Left menu card ~25%
+    Rectangle {
+        x: Theme.pad;
+        y: Theme.pad;
+        width: parent.width * 0.25 - Theme.pad;
+        height: parent.height - 2 * Theme.pad;
+        background: Theme.surface;
+        border-radius: Theme.radius;
+        z: 3;
+
+        VerticalLayout {
+            padding: Theme.pad-sm;
+            spacing: Theme.pad-sm;
+
+            HorizontalLayout {
+                width: 100%;
+                alignment: space-between;
+                cross-axis-alignment: center;
+                Text {
+                    text: "Settings";
+                    color: Theme.text;
+                    font-size: Theme.font-body;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-alignment: left;
+                }
+                IconButton {
+                    glyph: Icons.xmark;
+                    activate => { root.close-settings(); }
+                }
+            }
+
+            Flickable {
+                vertical-stretch: 1;
+                min-width: 0px;
+                content-width: self.width;
+
+                VerticalLayout {
+                    width: parent.width;
+                    min-width: 0px;
+                    spacing: 4px;
+                    alignment: start;
+
+                    for id in visible-pages: TouchArea {
+                        min-height: Theme.touch-min;
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        vertical-stretch: 0;
+                        clicked => { root.go-page(id); }
+                        Rectangle {
+                            x: 2px;
+                            y: 2px;
+                            width: parent.width - 4px;
+                            height: parent.height - 4px;
+                            border-radius: (parent.height - 4px) / 2;
+                            background: parent.pressed ? Theme.surface-press
+                                : (id == root.page ? Theme.accent : Theme.surface-2);
+                            border-width: 1px;
+                            border-color: id == root.page ? Theme.accent : Theme.surface-press;
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 10px;
+                                spacing: 8px;
+                                alignment: start;
+                                FaIcon {
+                                    glyph: Icons.chevron-right;
+                                    size: 10px;
+                                    tone: id == root.page ? Theme.text-on-accent : Theme.muted;
+                                    horizontal-stretch: 0;
+                                }
+                                Text {
+                                    text: id < root.page-names.length ? root.page-names[id] : "";
+                                    color: id == root.page ? Theme.text-on-accent : Theme.text;
+                                    font-size: Theme.font-caption;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: left;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
+    }
 
-        if update-status != 0: VerticalLayout {
-            spacing: Theme.pad-sm;
-            Text { text: "Updates"; color: Theme.muted; font-size: 14px; }
+    // Preset edit modal
+    if root.preset-edit-open && root.preset-selected: TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 40;
+        clicked => { root.close-preset-edit(); }
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Theme.dim;
+        }
+        TouchArea {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(560px, parent.width - 48px);
+            height: min(640px, parent.height - 48px);
+            clicked => { }
             Rectangle {
-                background: Theme.surface;
-                border-radius: 10px;
+                width: 100%;
+                height: 100%;
+                background: Theme.bg;
+                border-radius: Theme.radius;
+                border-width: 1px;
+                border-color: Theme.stroke;
                 VerticalLayout {
+                    width: 100%;
+                    height: 100%;
                     padding: Theme.pad;
                     spacing: Theme.pad-sm;
 
-                    Text {
-                        text: "Wijitify " + root.current-version;
-                        color: Theme.text;
-                        font-size: 18px;
-                        font-weight: 600;
+                    HorizontalLayout {
+                        width: 100%;
+                        spacing: Theme.pad-sm;
+                        alignment: stretch;
+                        cross-axis-alignment: center;
+                        Text {
+                            text: "Edit " + root.preset-name;
+                            color: Theme.text;
+                            font-size: Theme.font-title;
+                            font-weight: 700;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        IconButton {
+                            glyph: Icons.xmark;
+                            activate => { root.close-preset-edit(); }
+                        }
                     }
 
-                    if update-status == 1: Text {
-                        text: root.update-checked == "" ? "Up to date" : "Up to date · checked " + root.update-checked;
-                        color: Theme.muted;
-                        font-size: 14px;
-                    }
-                    if update-status == 2: VerticalLayout {
-                        spacing: 4px;
-                        Text {
-                            text: "Update available: v" + root.update-version;
-                            color: Theme.ok;
-                            font-size: 16px;
-                            font-weight: 600;
+                    Flickable {
+                        vertical-stretch: 1;
+                        min-height: 0px;
+                        content-width: self.width;
+                        VerticalLayout {
+                            width: parent.width;
+                            spacing: Theme.pad-sm;
+                            alignment: start;
+
+                            if !preset-is-builtin: SettingRow {
+                                label: "Name";
+                                tip: "Label on the dashboard preset button. The box is the width of that button’s name, so the dropdown arrow stays visible.";
+                                ShortInput {
+                                    box-width: Theme.preset-name-width;
+                                    font-weight: 600;
+                                    text <=> root.preset-name;
+                                    edited => { root.set-preset-name(root.preset-name); }
+                                }
+                            }
+                            if !preset-is-builtin: Dropdown {
+                                inline: true;
+                                caption: "View";
+                                tip: "Day, week, month, or year grain for this preset.";
+                                options: root.unit-options;
+                                selected: root.preset-unit;
+                                changed(i) => { root.set-preset-unit(i); }
+                            }
+                            if preset-is-builtin: SettingRow {
+                                label: "View";
+                                tip: "Built-in preset. The view unit stays fixed.";
+                                Text {
+                                    text: root.preset-unit == 0 ? "Day"
+                                        : root.preset-unit == 1 ? "Week"
+                                        : root.preset-unit == 2 ? "Month"
+                                        : root.preset-unit == 4 ? "Agenda" : "Year";
+                                    color: Theme.text;
+                                    font-size: Theme.font-body;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Dropdown {
+                                inline: true;
+                                compact: true;
+                                caption: root.preset-unit == 2 ? "Month count" : "Count";
+                                tip: root.preset-unit == 2
+                                    ? "How many month grids to show. With Start on this week, each one is another window of Week count."
+                                    : "How many of the selected unit to show at once (Day 2 = two days; Agenda count is weeks).";
+                                options: root.count-options;
+                                selected: root.preset-count - 1;
+                                changed(i) => { root.set-preset-count(i + 1); }
+                            }
+                            if preset-unit == 2: Dropdown {
+                                inline: true;
+                                compact: true;
+                                caption: "Week count";
+                                tip: "Week rows in the month grid. 6 is a full month. 2 with Start on this week is this week and the next.";
+                                options: root.week-count-options;
+                                selected: root.preset-month-weeks - 1;
+                                changed(i) => { root.set-preset-month-weeks(i + 1); }
+                            }
+                            if preset-unit == 2: SettingRow {
+                                label: "Start on this week";
+                                tip: "Top row is the week of the date you are viewing, instead of the first week of the month. Arrows move forward by the week count.";
+                                Switch {
+                                    checked: root.preset-month-from-week;
+                                    toggled => { root.set-preset-month-from-week(self.checked); }
+                                }
+                            }
+                            Dropdown {
+                                inline: true;
+                                caption: "Anchor";
+                                tip: "Where the visible range starts: current period first, or a fixed weekday first.";
+                                options: root.anchor-options;
+                                selected: root.preset-anchor;
+                                changed(i) => { root.set-preset-anchor(i); }
+                            }
+                            SettingRow {
+                                label: "Days";
+                                tip: "Uncheck a weekday to hide it in this preset (day, week, month, year, and agenda). At least one day stays on.";
+                                HorizontalLayout {
+                                    spacing: Theme.pad-sm;
+                                    alignment: end;
+                                    for d in preset-weekdays: TouchArea {
+                                        min-height: Theme.touch-min;
+                                        clicked => { root.set-preset-weekday(d.index, !d.on); }
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            alignment: center;
+                                            cross-axis-alignment: center;
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                vertical-stretch: 0;
+                                                border-radius: 3px;
+                                                border-width: 2px;
+                                                border-color: d.on ? Theme.accent : Theme.muted;
+                                                background: d.on ? Theme.accent : transparent;
+                                                if d.on: FaIcon {
+                                                    glyph: Icons.check;
+                                                    size: 11px;
+                                                    tone: Theme.text-on-accent;
+                                                    width: 100%;
+                                                    height: 100%;
+                                                }
+                                            }
+                                            Text {
+                                                text: d.label;
+                                                color: Theme.text;
+                                                font-size: Theme.font-caption;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if preset-unit == 0 || preset-unit == 1: Dropdown {
+                                inline: true;
+                                caption: "Day grid starts";
+                                tip: "First hour shown on the Day/Week timed grid for this preset.";
+                                options: root.hour-options;
+                                selected: root.preset-day-start-hour;
+                                changed(i) => { root.set-preset-day-start(i); }
+                            }
+                            if preset-unit == 0 || preset-unit == 1: Dropdown {
+                                inline: true;
+                                caption: "Day grid ends";
+                                tip: "Last hour label on the Day/Week timed grid (inclusive).";
+                                options: root.hour-options;
+                                selected: root.preset-day-end-hour;
+                                changed(i) => { root.set-preset-day-end(i); }
+                            }
+                            if preset-unit == 0 || preset-unit == 1: Dropdown {
+                                inline: true;
+                                caption: "Time interval";
+                                tip: "Row step on the Day/Week grid: 15 minutes, 30 minutes, 1 hour, or 2 hours.";
+                                options: root.interval-options;
+                                selected: root.preset-day-interval;
+                                changed(i) => { root.set-preset-day-interval(i); }
+                            }
+                            if !preset-is-builtin: Rectangle { height: 1px; background: Theme.surface-2; }
+                            if !preset-is-builtin: HorizontalLayout {
+                                spacing: Theme.pad-sm;
+                                alignment: start;
+                                Button {
+                                    label: "Remove preset";
+                                    role: "danger";
+                                    activate => {
+                                        root.remove-preset(root.preset-index);
+                                        root.close-preset-edit();
+                                    }
+                                }
+                                InfoTip {
+                                    text: "Deletes this custom preset. Built-in presets cannot be removed.";
+                                }
+                            }
                         }
-                        if update-notes != "": Text {
-                            text: root.update-notes;
-                            color: Theme.muted;
-                            font-size: 13px;
-                            wrap: word-wrap;
-                        }
-                    }
-                    if update-status == 3: Text {
-                        text: "Installing… " + root.update-percent + "%";
-                        color: Theme.accent;
-                        font-size: 16px;
-                    }
-                    if update-status == 4: Text {
-                        text: "Update installed — restart to use it";
-                        color: Theme.ok;
-                        font-size: 16px;
-                    }
-                    if update-status == 5: Text {
-                        text: root.update-error;
-                        color: Theme.danger;
-                        font-size: 14px;
-                        wrap: word-wrap;
                     }
 
                     HorizontalLayout {
                         spacing: Theme.pad-sm;
-                        if update-status == 1 || update-status == 5: NavButton {
-                            label: update-status == 5 ? "Retry" : "Check now";
-                            activate => { root.check-updates(); }
-                        }
-                        if update-status == 2: NavButton {
-                            label: "Update";
-                            activate => { root.start-update(); }
-                        }
-                        if update-status == 4: NavButton {
-                            label: "Restart now";
-                            activate => { root.restart-app(); }
+                        alignment: end;
+                        Button {
+                            label: "Done";
+                            role: "primary";
+                            activate => { root.close-preset-edit(); }
                         }
                     }
                 }
             }
-        }
-
-        NavButton { label: "Run setup again"; activate => { root.run-setup-again(); } }
-        NavButton { label: "Quit to desktop"; activate => { root.quit-app(); } }
-
-        if perf-overlay != "": Text {
-            text: root.perf-overlay;
-            color: Theme.ok;
-            font-size: 12px;
-            font-family: "monospace";
         }
     }
 }

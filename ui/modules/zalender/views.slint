@@ -1,144 +1,1823 @@
 import { Theme } from "../../theme.slint";
-import { NavButton } from "../../shell/nav.slint";
+import { Icons, FaIcon, EventIcon } from "../../icons.slint";
+import {
+    Button, IconButton, PillButton, ViewPill, Field, Switch
+} from "../../shell/kit.slint";
+
+/// Timed: surface fill + color bar. All-day: solid event color.
+/// No `clip`: femtovg renders rounded clips to an unaligned texture, blurring text at fractional grid positions.
+component EventChip inherits Rectangle {
+    in property <string> title: "";
+    in property <string> time-text: "";
+    in property <color> event-color: Theme.accent;
+    in property <bool> all-day: false;
+    in property <bool> show-time: false;
+    in property <bool> compact: false;
+    /// Day/week all-day row: two-line wrap, then ellipsis.
+    in property <bool> two-line: false;
+
+    background: root.all-day ? root.event-color : Theme.surface-2;
+    border-radius: root.compact ? 3px : 4px;
+    // 4px matches the two-line vertical padding below.
+    min-height: root.two-line ? line-sample.preferred-height + 4px
+        : root.compact ? 16px
+        : (root.show-time ? 36px : 22px);
+
+    // Same face as the two-line title, so the chip is exactly two lines tall.
+    line-sample := Text {
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        accessible-role: none;
+        text: "Ag\nAg";
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    HorizontalLayout {
+        width: 100%;
+        spacing: 0;
+        if !root.all-day: Rectangle {
+            width: Theme.event-bar;
+            background: root.event-color;
+            border-top-left-radius: root.border-radius;
+            border-bottom-left-radius: root.border-radius;
+            vertical-stretch: 1;
+        }
+        VerticalLayout {
+            padding-left: root.compact || root.two-line ? 4px : 6px;
+            padding-right: root.compact || root.two-line ? 4px : 6px;
+            padding-top: root.two-line ? 2px : (root.compact ? 1px : 3px);
+            padding-bottom: root.two-line ? 2px : (root.compact ? 1px : 3px);
+            spacing: 0px;
+            alignment: root.two-line ? start : center;
+            Text {
+                text: root.title;
+                color: root.all-day ? Theme.text-on-accent : Theme.text;
+                font-size: root.compact || root.two-line ? 11px : Theme.font-event;
+                font-weight: root.all-day || !root.compact ? 600 : 500;
+                wrap: root.two-line ? word-wrap : no-wrap;
+                overflow: elide;
+                // Last visible line gets the ellipsis when the title does not fit.
+                max-lines: root.two-line ? 2 : 0;
+                min-width: 0px;
+                horizontal-stretch: 1;
+                vertical-alignment: top;
+                min-height: root.two-line ? line-sample.preferred-height : 0px;
+            }
+            if root.show-time && root.time-text != "": Text {
+                text: root.time-text;
+                color: root.all-day ? Theme.text-on-accent : Theme.muted;
+                font-size: root.compact ? 9px : Theme.font-caption;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+}
+
+/// Calendar visibility toggle: colored square + check when on, name centered inline.
+component FeedCheckRow inherits TouchArea {
+    in property <string> name: "";
+    in property <color> swatch: Theme.accent;
+    in property <bool> checked: true;
+    callback toggled;
+
+    height: 36px;
+    vertical-stretch: 0;
+    clicked => { root.toggled(); }
+
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            vertical-stretch: 0;
+            border-radius: 3px;
+            border-width: 2px;
+            border-color: root.swatch;
+            background: root.checked ? root.swatch : transparent;
+            if root.checked: FaIcon {
+                glyph: Icons.check;
+                size: 11px;
+                tone: Theme.text-on-accent;
+                width: 100%;
+                height: 100%;
+            }
+        }
+        Text {
+            text: root.name;
+            color: Theme.text;
+            font-size: Theme.font-caption;
+            height: 18px;
+            vertical-alignment: center;
+            horizontal-alignment: left;
+            horizontal-stretch: 1;
+            vertical-stretch: 0;
+            opacity: root.checked ? 1.0 : 0.5;
+        }
+    }
+}
+
+export struct EventRow {
+    uid: string,
+    recurrence-id: string,
+    feed-id: string,
+    /// ISO date yyyy-mm-dd for day/week grid placement.
+    date-key: string,
+    time: string,
+    /// Compact 12h range for chips (independent of day-modal show-time).
+    time-short: string,
+    title: string,
+    calendar: string,
+    description: string,
+    color: color,
+    icon: string,
+    writable: bool,
+    all-day: bool,
+    /// Minutes from midnight for timed events; -1 when all-day.
+    start-mins: int,
+    /// 0-based index among that day's events (all-day first, then timed).
+    day-ord: int,
+    /// 0-based index within the timed hour-slot bucket; all-day uses all-day order.
+    slot-ord: int,
+    /// Size of the slot/all-day bucket this row belongs to (for +N more).
+    slot-total: int,
+}
 
 export struct DayCell {
     day: int,
     in-month: bool,
     is-today: bool,
+    is-past: bool,
+    is-weekend: bool,
     has-events: bool,
+    /// Total events that day (for +N more after fitting chips).
+    event-count: int,
+    /// All-day subset count (day/week all-day row overflow).
+    all-day-count: int,
+    /// Matches selected_day (light highlight when not today).
+    is-selected: bool,
+    /// In the selected week while week view is active.
+    in-selected-week: bool,
     label: string,
+    event-color: color,
+    /// ISO date yyyy-mm-dd for selection callbacks (empty when padding).
+    date-key: string,
+    /// This day's chip rows (main day/week/month/agenda grids only; empty elsewhere).
+    events: [EventRow],
 }
 
-export struct AgendaItem {
-    time: string,
-    title: string,
-    color: string,
+export struct FeedChip {
+    id: string,
+    name: string,
+    color: color,
+    visible: bool,
+    writable: bool,
+    /// Writable calendar new events are created on. At most one feed is true.
+    is-default: bool,
+}
+
+/// Day-modal hour bucket (label + events starting in that slot).
+export struct DayHourBucket {
+    label: string,
+    start-mins: int,
+    end-mins: int,
+}
+
+export struct CustomFieldRow {
+    id: string,
+    name: string,
+    /// 0 text, 1 long, 2 bool, 3 choice
+    field-type: int,
+    value: string,
+    options: string,
+}
+
+component MiniMonth inherits VerticalLayout {
+    in property <string> title: "";
+    in property <[string]> week-labels;
+    in property <[DayCell]> days;
+    in property <int> offset: 0;
+    in property <int> columns: 7;
+    callback select-date(string);
+
+    spacing: 2px;
+
+    Text {
+        text: root.title;
+        color: Theme.text;
+        font-size: Theme.font-caption;
+        font-weight: 600;
+        horizontal-alignment: center;
+    }
+    // Fixed equal cells — event dots are overlaid and never change column/row size.
+    GridLayout {
+        spacing: 1px;
+        Row {
+            for w in week-labels: Text {
+                text: w;
+                color: Theme.muted;
+                font-size: 10px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                min-width: 0px;
+                preferred-width: 0px;
+                height: 16px;
+                horizontal-stretch: 1;
+            }
+        }
+        for row in 6: Row {
+            for col in root.columns: ta := TouchArea {
+                property <DayCell> d: days[root.offset + row * root.columns + col];
+                min-width: 0px;
+                preferred-width: 0px;
+                height: 28px;
+                horizontal-stretch: 1;
+                clicked => {
+                    if d.date-key != "" { root.select-date(d.date-key); }
+                }
+                Rectangle {
+                    clip: true;
+                    background: ta.pressed ? Theme.surface-press
+                        : ((ta.d.is-selected || ta.d.in-selected-week) && !ta.d.is-today
+                            ? Theme.selection-fill : transparent);
+                    border-radius: 3px;
+                    // Filled today circle (accent); selection uses light fill above when not today
+                    if ta.d.is-today: Rectangle {
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 10px;
+                        background: Theme.accent;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2 - 1px;
+                    }
+                    Text {
+                        text: ta.d.label;
+                        color: ta.d.is-today ? Theme.text-on-accent : Theme.text;
+                        font-size: 11px;
+                        font-weight: ta.d.is-today || ta.d.is-selected ? 700 : 400;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        width: 100%;
+                        height: 100%;
+                    }
+                    if ta.d.has-events && !ta.d.is-today: Rectangle {
+                        width: 4px;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: Theme.muted;
+                        x: (parent.width - self.width) / 2;
+                        y: parent.height - self.height - 2px;
+                    }
+                }
+            }
+        }
+    }
+}
+
+component MonthGrid inherits Rectangle {
+    in property <[string]> week-labels;
+    in property <[DayCell]> days;
+    in property <int> offset: 0;
+    in property <int> columns: 7;
+    in property <int> rows: 6;
+    in property <bool> shade-weekends: true;
+    callback select-date(string);
+
+    vertical-stretch: 1;
+    horizontal-stretch: 1;
+    clip: true;
+    background: Theme.bg;
+
+    // One grid so header columns and day cells share equal column widths.
+    GridLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 0px;
+        padding: 0px;
+
+        Row {
+            for w in week-labels: Text {
+                text: w;
+                color: Theme.muted;
+                font-size: Theme.font-caption;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                min-width: 0px;
+                preferred-width: 0px;
+                min-height: 28px;
+                max-height: 28px;
+                horizontal-stretch: 1;
+            }
+        }
+        for row in root.rows: Row {
+            for col in root.columns: ta := TouchArea {
+                property <DayCell> d: days[root.offset + row * root.columns + col];
+                // 16px chip + 2px gap below the 27px label row; one slot is kept for "+N more" on overflow.
+                property <int> max-slots: max(0, floor((self.height - 27px) / 18px));
+                property <int> chip-limit: ta.d.event-count > ta.max-slots
+                    ? max(0, ta.max-slots - 1)
+                    : ta.d.event-count;
+                min-width: 0px;
+                preferred-width: 0px;
+                preferred-height: 0px;
+                min-height: 48px;
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                clicked => {
+                    if d.date-key != "" { root.select-date(d.date-key); }
+                }
+                Rectangle {
+                    clip: true;
+                    border-width: 1px;
+                    border-color: Theme.stroke;
+                    background: ta.pressed ? Theme.surface-press
+                        : ((ta.d.is-selected || ta.d.in-selected-week) && !ta.d.is-today
+                            ? Theme.selection-fill
+                            : (root.shade-weekends && ta.d.is-weekend ? Theme.weekend-fill : Theme.bg));
+                    // Today accent ring
+                    if ta.d.is-today: Rectangle {
+                        border-width: 2px;
+                        border-color: Theme.accent;
+                        border-radius: 2px;
+                        background: transparent;
+                        width: parent.width - 2px;
+                        height: parent.height - 2px;
+                        x: 1px;
+                        y: 1px;
+                    }
+                    VerticalLayout {
+                        padding: 3px;
+                        spacing: 2px;
+                        alignment: start;
+                        HorizontalLayout {
+                            spacing: 4px;
+                            alignment: start;
+                            if ta.d.is-today: Rectangle {
+                                width: 22px;
+                                height: 22px;
+                                border-radius: 11px;
+                                background: Theme.accent;
+                                Text {
+                                    // Day number only — label may include month abbr for other-month cells.
+                                    text: ta.d.day;
+                                    color: Theme.text-on-accent;
+                                    font-size: Theme.font-caption;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    width: 100%;
+                                    height: 100%;
+                                }
+                            }
+                            if !ta.d.is-today: Text {
+                                text: ta.d.label;
+                                color: Theme.text;
+                                font-size: Theme.font-caption;
+                                font-weight: 600;
+                            }
+                        }
+                    }
+                    // Explicit x/y keeps chips out of the cell's layout size, which `max-slots` reads back.
+                    for e in ta.d.events: EventChip {
+                        x: 3px;
+                        y: 27px + e.day-ord * 18px;
+                        width: parent.width - 6px;
+                        height: 16px;
+                        visible: e.day-ord < ta.chip-limit;
+                        title: e.title;
+                        event-color: e.color;
+                        all-day: e.all-day;
+                        compact: true;
+                    }
+                    Text {
+                        x: 5px;
+                        y: 27px + ta.chip-limit * 18px;
+                        width: parent.width - 10px;
+                        height: 16px;
+                        visible: ta.d.event-count > ta.chip-limit;
+                        text: "+" + (ta.d.event-count - ta.chip-limit) + " more";
+                        color: Theme.muted;
+                        font-size: 10px;
+                        font-weight: 500;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
 }
 
 export component ZalenderView inherits Rectangle {
-    background: Theme.bg;
+    // Chrome (top + side) shares this surface; the active view uses Theme.bg.
+    background: Theme.surface;
 
-    in property <string> title-month: "";
+    in property <string> clock-text: "";
+    in property <string> title-period: "";
     in property <string> status-text: "";
+    in property <int> status-kind: 0;
     in property <bool> refreshing: false;
-    in property <[DayCell]> days;
-    in property <[AgendaItem]> agenda;
-    in property <string> agenda-date: "";
     in property <bool> empty-feeds: false;
 
-    callback prev-month();
-    callback next-month();
+    /// 0 day, 1 week, 2 month, 3 year, 4 agenda
+    in property <int> view-unit: 2;
+    in property <[string]> preset-options;
+    in property <int> preset-selected: 0;
+    in property <string> preset-label: "Month";
+    in property <int> view-count: 1;
+
+    in property <[string]> week-labels;
+    /// Month/year header labels after hidden weekdays are removed.
+    in property <[string]> grid-labels;
+    in property <int> grid-columns: 7;
+    /// Week rows in each month grid (6 is a full month).
+    in property <int> month-rows: 6;
+    in property <string> side-title: "";
+    in property <[DayCell]> side-days;
+    in property <[DayCell]> main-days;
+    in property <[string]> year-month-titles;
+    in property <[FeedChip]> feeds;
+    /// Timed-grid hour slots from the active preset (uniform step).
+    in property <[DayHourBucket]> hour-slots;
+    property <int> grid-start: hour-slots.length > 0 ? hour-slots[0].start-mins : 0;
+    property <int> grid-end: hour-slots.length > 0 ? hour-slots[hour-slots.length - 1].end-mins : 0;
+    property <int> grid-step: hour-slots.length > 0 ? max(1, hour-slots[0].end-mins - hour-slots[0].start-mins) : 60;
+    // Per 48px hour row: one chip with time, else two compact chips.
+    property <int> timed-max: show-event-time ? 1 : 2;
+    property <length> timed-chip-h: show-event-time ? 44px : 21px;
+    /// Same slots for the month/year day modal hourly list.
+    in property <[DayHourBucket]> day-hour-buckets;
+    /// Minutes from midnight for the now-lollipop.
+    in property <int> now-mins: 0;
+    /// Title + time on chips (day / week·1 / agenda).
+    in property <bool> show-event-time: false;
+    in property <bool> dim-past: true;
+    in property <bool> shade-weekends: true;
+
+    in property <bool> day-modal-open: false;
+    in property <string> day-modal-title: "";
+    in property <string> selected-date-key: "";
+    in property <[EventRow]> day-events;
+
+    in property <bool> name-local-open: false;
+    in-out property <string> name-local-draft: "";
+
+    in property <bool> create-event-open: false;
+    in-out property <string> create-title: "";
+    in property <string> create-date-key: "";
+    in property <string> create-date-label: "";
+    in property <int> create-start-mins: 540;
+    in property <int> create-end-mins: 600;
+    in property <bool> create-all-day: false;
+    in property <string> create-calendar-name: "Local calendar";
+    in property <string> create-start-label: "";
+    in property <string> create-end-label: "";
+
+    in property <bool> event-detail-open: false;
+    in property <EventRow> detail-event;
+    in property <string> detail-custom-summary: "";
+
+    in property <bool> customize-open: false;
+    in property <string> customize-color: "";
+    in property <string> customize-icon: "";
+    in property <bool> customize-occurrence: false;
+    in property <bool> customize-has-recurrence: false;
+    in property <[CustomFieldRow]> customize-fields;
+
+    in property <bool> edit-placeholder-open: false;
+
+    callback prev-period();
+    callback next-period();
+    callback zoom-out();
     callback go-today();
-    callback select-day(int);
+    callback go-preset();
+    callback select-preset(int);
     callback open-settings();
     callback refresh();
+    callback select-date(string);
+    /// Left sidebar mini-month: jump to day view for that date (no modal).
+    callback select-side-date(string);
+    callback toggle-feed(int);
+    callback set-default-feed(int);
+    callback close-day-modal();
+    callback open-create-event(string, int);
+    callback close-create-event();
+    callback create-set-title(string);
+    callback create-set-all-day(bool);
+    callback create-set-start-mins(int);
+    callback create-set-end-mins(int);
+    callback create-save();
+    callback name-local-set(string);
+    callback name-local-save();
+    callback open-event(int);
+    callback open-event-uid(string, string);
+    callback close-event-detail();
+    callback open-customize();
+    callback open-edit();
+    callback close-customize();
+    callback close-edit-placeholder();
+    callback customize-set-color(string);
+    callback customize-set-icon(string);
+    callback customize-set-occurrence(bool);
+    callback customize-set-field(string, string);
+    callback customize-save();
+
+    /// Left mini-month + calendar list; toggled from the gear row.
+    property <bool> sidebar-open: true;
 
     VerticalLayout {
-        padding: Theme.pad;
-        spacing: Theme.pad-sm;
+        padding: 0;
+        spacing: 0;
 
-        HorizontalLayout {
-            spacing: Theme.pad-sm;
-            NavButton { label: "‹"; activate => { root.prev-month(); } }
-            Text {
-                text: root.title-month;
-                color: Theme.text;
-                font-size: 24px;
-                font-weight: 700;
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-            }
-            NavButton { label: "Today"; activate => { root.go-today(); } }
-            NavButton { label: "›"; activate => { root.next-month(); } }
-            NavButton { label: "↻"; activate => { root.refresh(); } }
-        }
+        // Top chrome: Gear · collapse | [calendar] Today · <> · Month Year · Refresh
+        // Logo assets kept under assets/zalender-logo-*.png for possible future use.
+        Rectangle {
+            min-height: Theme.touch-min + 8px;
+            max-height: Theme.touch-min + 8px;
+            background: Theme.surface;
 
-        Text {
-            text: root.refreshing ? "Refreshing…  " + root.status-text : root.status-text;
-            color: Theme.muted;
-            font-size: 14px;
-        }
-
-        if empty-feeds: VerticalLayout {
-            spacing: Theme.pad;
-            alignment: center;
-            Text {
-                text: "No calendars yet";
-                color: Theme.text;
-                font-size: 22px;
-                horizontal-alignment: center;
-            }
-            Text {
-                text: "Add an ICS feed in Settings or run setup again.";
-                color: Theme.muted;
-                font-size: 16px;
-                horizontal-alignment: center;
-                wrap: word-wrap;
-            }
-            NavButton { label: "Open settings"; activate => { root.open-settings(); } }
-        }
-
-        if !empty-feeds: VerticalLayout {
-            spacing: Theme.pad-sm;
             HorizontalLayout {
-                spacing: 4px;
-                for w in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]: Text {
-                    text: w;
-                    color: Theme.muted;
-                    font-size: 12px;
-                    horizontal-alignment: center;
-                    width: 14%;
+                width: 100%;
+                height: 100%;
+                padding-right: Theme.pad-sm;
+                spacing: 0;
+                alignment: stretch;
+                cross-axis-alignment: center;
+
+                // When open, match sidebar width; when closed, shrink to the icon cluster.
+                HorizontalLayout {
+                    min-width: root.sidebar-open ? 260px : Theme.touch-min * 2 + Theme.pad-sm * 2;
+                    max-width: root.sidebar-open ? 260px : Theme.touch-min * 2 + Theme.pad-sm * 2;
+                    preferred-width: root.sidebar-open ? 260px : Theme.touch-min * 2 + Theme.pad-sm * 2;
+                    padding-left: Theme.pad-sm;
+                    padding-right: Theme.pad-sm;
+                    spacing: Theme.pad-sm;
+                    alignment: start;
+                    cross-axis-alignment: center;
+                    IconButton {
+                        icon: Icons.gear-hollow;
+                        activate => { root.open-settings(); }
+                    }
+                    IconButton {
+                        icon: root.sidebar-open ? Icons.panel-left-fill : Icons.panel-left;
+                        activate => { root.sidebar-open = !root.sidebar-open; }
+                    }
+                    if root.sidebar-open: Rectangle { horizontal-stretch: 1; }
+                }
+
+                if root.sidebar-open: Rectangle {
+                    width: 1px;
+                    height: 28px;
+                    background: Theme.stroke;
+                }
+
+                // Over the calendar view (not the sidebar)
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    padding-left: Theme.pad-sm;
+                    spacing: Theme.pad-sm;
+                    alignment: start;
+                    cross-axis-alignment: center;
+
+                    PillButton {
+                        label: "Today";
+                        activate => { root.go-today(); }
+                    }
+                    IconButton {
+                        glyph: Icons.chevron-left;
+                        activate => { root.prev-period(); }
+                    }
+                    IconButton {
+                        glyph: Icons.chevron-right;
+                        activate => { root.next-period(); }
+                    }
+                    TouchArea {
+                        clicked => { root.zoom-out(); }
+                        Text {
+                            text: root.title-period;
+                            color: Theme.text;
+                            font-size: Theme.font-title;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+                    ViewPill {
+                        selected: root.preset-selected;
+                        label: root.preset-label;
+                        options: root.preset-options;
+                        changed(i) => { root.select-preset(i); }
+                    }
+                    PillButton {
+                        label: "Default";
+                        activate => { root.go-preset(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    IconButton {
+                        glyph: Icons.refresh;
+                        activate => { root.refresh(); }
+                    }
                 }
             }
+        }
+        Rectangle {
+            height: 1px;
+            background: Theme.stroke;
+            horizontal-stretch: 1;
+        }
 
+        if empty-feeds: Rectangle {
+            vertical-stretch: 1;
+            background: Theme.bg;
             VerticalLayout {
-                spacing: 4px;
-                for row in 6: HorizontalLayout {
-                    spacing: 4px;
-                    for col in 7: ta := TouchArea {
-                        property <DayCell> d: days[row * 7 + col];
-                        min-height: 56px;
-                        clicked => { if d.in-month { root.select-day(row * 7 + col); } }
-                        Rectangle {
-                            background: ta.pressed ? Theme.surface-2 : (ta.d.is-today ? Theme.surface-2 : Theme.surface);
-                            border-radius: 8px;
-                            border-width: ta.d.is-today ? 2px : 0;
-                            border-color: Theme.accent;
-                            opacity: ta.d.in-month ? 1.0 : 0.35;
-                            VerticalLayout {
-                                padding: 6px;
-                                Text {
-                                    text: ta.d.label;
-                                    color: Theme.text;
-                                    font-size: 16px;
+                padding: Theme.pad;
+                spacing: Theme.pad;
+                alignment: center;
+                Text {
+                    text: "No calendars yet";
+                    color: Theme.text;
+                    font-size: Theme.font-title;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Add an ICS feed in Settings or run setup again.";
+                    color: Theme.muted;
+                    font-size: Theme.font-body;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Button {
+                    label: "Open settings";
+                    role: "secondary";
+                    activate => { root.open-settings(); }
+                }
+            }
+        }
+
+        if !empty-feeds: HorizontalLayout {
+            spacing: 0;
+            vertical-stretch: 1;
+
+            // Left chrome sidebar (same surface as top bar)
+            if root.sidebar-open: Rectangle {
+                min-width: 260px;
+                max-width: 260px;
+                background: Theme.surface;
+                VerticalLayout {
+                width: 100%;
+                height: 100%;
+                padding: Theme.pad-sm;
+                spacing: Theme.pad-sm;
+
+                    MiniMonth {
+                        title: root.side-title;
+                        week-labels: root.week-labels;
+                        days: root.side-days;
+                        offset: 0;
+                        select-date(k) => { root.select-side-date(k); }
+                    }
+
+                    Rectangle {
+                        height: 1px;
+                        background: Theme.stroke;
+                        horizontal-stretch: 1;
+                    }
+
+                    Flickable {
+                        vertical-stretch: 1;
+                        content-width: parent.width - 2 * Theme.pad-sm;
+                        VerticalLayout {
+                            width: parent.width;
+                            spacing: Theme.pad-sm;
+                            alignment: start;
+
+                            Text {
+                                text: "Editable calendars";
+                                color: Theme.muted;
+                                font-size: Theme.font-caption;
+                                font-weight: 600;
+                            }
+                            for f[i] in feeds: VerticalLayout {
+                                if f.writable: HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    cross-axis-alignment: center;
+                                    FeedCheckRow {
+                                        horizontal-stretch: 1;
+                                        name: f.name;
+                                        swatch: f.color;
+                                        checked: f.visible;
+                                        toggled => { root.toggle-feed(i); }
+                                    }
+                                    TouchArea {
+                                        min-width: 84px;
+                                        height: 36px;
+                                        clicked => { root.set-default-feed(i); }
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            alignment: end;
+                                            cross-axis-alignment: center;
+                                            Rectangle {
+                                                width: 18px;
+                                                height: 18px;
+                                                vertical-stretch: 0;
+                                                border-radius: 3px;
+                                                border-width: 2px;
+                                                border-color: f.is-default ? Theme.accent : Theme.muted;
+                                                background: f.is-default ? Theme.accent : transparent;
+                                                if f.is-default: FaIcon {
+                                                    glyph: Icons.check;
+                                                    size: 11px;
+                                                    tone: Theme.text-on-accent;
+                                                    width: 100%;
+                                                    height: 100%;
+                                                }
+                                            }
+                                            Text {
+                                                text: "Default";
+                                                color: f.is-default ? Theme.text : Theme.muted;
+                                                font-size: Theme.font-caption;
+                                                height: 18px;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
                                 }
-                                if ta.d.has-events: Rectangle {
-                                    width: 8px; height: 8px; border-radius: 4px;
-                                    background: Theme.accent;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: "ICS calendars";
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                    font-weight: 600;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                IconButton {
+                                    glyph: Icons.plus;
+                                    activate => { root.open-settings(); }
+                                }
+                            }
+                            for f[i] in feeds: VerticalLayout {
+                                if !f.writable: FeedCheckRow {
+                                    name: f.name;
+                                    swatch: f.color;
+                                    checked: f.visible;
+                                    toggled => { root.toggle-feed(i); }
+                                }
+                            }
+                        }
+                    }
+
+                }
+            }
+            if root.sidebar-open: Rectangle {
+                width: 1px;
+                background: Theme.stroke;
+                vertical-stretch: 1;
+            }
+
+            // Active view — own background, inset from chrome
+            VerticalLayout {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                padding-top: Theme.pad-sm;
+                padding-right: Theme.pad-sm;
+                padding-bottom: Theme.pad-sm;
+                padding-left: root.sidebar-open ? 0 : Theme.pad-sm;
+
+                Rectangle {
+                    background: Theme.bg;
+                    border-radius: Theme.radius;
+                    border-width: 1px;
+                    border-color: Theme.stroke;
+                    vertical-stretch: 1;
+                    horizontal-stretch: 1;
+                    clip: true;
+
+                // Day / week — frozen day header + all-day; only the hour grid scrolls
+                if view-unit == 0 || view-unit == 1: VerticalLayout {
+                    width: 100%;
+                    height: 100%;
+                    spacing: 0px;
+                    padding: 4px;
+
+                    // Frozen day headers — 56px axis | 8px gap | equal day columns
+                    HorizontalLayout {
+                        spacing: 0px;
+                        width: 100%;
+                        min-height: root.view-unit == 0 ? 64px : 52px;
+                        max-height: root.view-unit == 0 ? 64px : 52px;
+                        vertical-stretch: 0;
+                        Rectangle {
+                            min-width: 56px;
+                            max-width: 56px;
+                            preferred-width: 56px;
+                        }
+                        Rectangle {
+                            min-width: Theme.pad-sm;
+                            max-width: Theme.pad-sm;
+                            preferred-width: Theme.pad-sm;
+                        }
+                        HorizontalLayout {
+                            spacing: root.view-unit == 1 ? 3px : 0px;
+                            horizontal-stretch: 1;
+                            for cell[d] in main-days: TouchArea {
+                                // preferred-width 0 + equal stretch — must match all-day / hour columns.
+                                min-width: 0px;
+                                preferred-width: 0px;
+                                horizontal-stretch: 1;
+                                clicked => {
+                                    if cell.date-key != "" { root.select-date(cell.date-key); }
+                                }
+                                Rectangle {
+                                    width: 100%;
+                                    height: 100%;
+                                    border-radius: 4px;
+                                    background: parent.pressed ? Theme.surface-press : transparent;
+                                    VerticalLayout {
+                                        width: 100%;
+                                        height: 100%;
+                                        spacing: 2px;
+                                        alignment: center;
+                                        // Weekday above day number — both centered in the column.
+                                        Text {
+                                            text: cell.label;
+                                            color: cell.is-today ? Theme.accent : Theme.muted;
+                                            font-size: root.view-unit == 1 ? 11px : Theme.font-caption;
+                                            font-weight: 600;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                            width: 100%;
+                                            overflow: elide;
+                                        }
+                                        // Same-sized badge every column so stretch widths match all-day/hours.
+                                        if root.view-unit == 0 || root.view-unit == 1: HorizontalLayout {
+                                            width: 100%;
+                                            alignment: center;
+                                            Rectangle {
+                                                width: 32px;
+                                                height: 32px;
+                                                border-radius: 16px;
+                                                background: cell.is-today ? Theme.accent
+                                                    : (cell.is-selected ? Theme.selection-fill : transparent);
+                                                Text {
+                                                    text: cell.day;
+                                                    color: cell.is-today ? Theme.text-on-accent : Theme.text;
+                                                    font-size: Theme.font-body;
+                                                    font-weight: 700;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                    width: 100%;
+                                                    height: 100%;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Frozen all-day row — two-line chips; capped so it never steals the hour grid
+                    HorizontalLayout {
+                        spacing: 0px;
+                        width: 100%;
+                        min-height: 48px;
+                        // Two chips of two lines, plus the cell's padding and the gap between them.
+                        max-height: 104px;
+                        vertical-stretch: 0;
+                        Text {
+                            text: "All day";
+                            color: Theme.muted;
+                            font-size: 11px;
+                            min-width: 56px;
+                            max-width: 56px;
+                            preferred-width: 56px;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                        }
+                        Rectangle {
+                            min-width: Theme.pad-sm;
+                            max-width: Theme.pad-sm;
+                            preferred-width: Theme.pad-sm;
+                        }
+                        HorizontalLayout {
+                            spacing: root.view-unit == 1 ? 3px : 0px;
+                            horizontal-stretch: 1;
+                            vertical-stretch: 0;
+                            for cell[d] in main-days: Rectangle {
+                                // Cap at 2 double-height chips (~80px); overflow uses "+N more".
+                                property <int> ad-limit: cell.all-day-count > 2 ? 1 : min(cell.all-day-count, 2);
+                                min-width: 0px;
+                                preferred-width: 0px;
+                                horizontal-stretch: 1;
+                                vertical-stretch: 0;
+                                height: 100%;
+                                clip: true;
+                                background: root.shade-weekends && cell.is-weekend ? Theme.weekend-fill : Theme.bg;
+                                border-width: 1px;
+                                border-color: Theme.stroke;
+                                VerticalLayout {
+                                    padding: 2px;
+                                    spacing: 2px;
+                                    alignment: start;
+                                    for e in cell.events: TouchArea {
+                                        min-width: 0px;
+                                        preferred-width: 0px;
+                                        horizontal-stretch: 1;
+                                        visible: e.all-day && e.slot-ord < ad-limit;
+                                        clicked => { root.open-event-uid(cell.date-key, e.uid); }
+                                        VerticalLayout {
+                                            EventChip {
+                                                title: e.title;
+                                                time-text: "";
+                                                event-color: e.color;
+                                                all-day: true;
+                                                show-time: false;
+                                                compact: true;
+                                                two-line: true;
+                                                min-width: 0px;
+                                                preferred-width: 0px;
+                                                horizontal-stretch: 1;
+                                            }
+                                        }
+                                    }
+                                    if cell.all-day-count > ad-limit: Text {
+                                        text: "+" + (cell.all-day-count - ad-limit) + " more";
+                                        color: Theme.muted;
+                                        font-size: 10px;
+                                        font-weight: 500;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Scrollable hour grid — takes all remaining height
+                    Flickable {
+                        vertical-stretch: 1;
+                        min-height: 120px;
+                        content-width <=> self.width;
+                        HorizontalLayout {
+                            spacing: 0px;
+                            width: 100%;
+                            min-height: root.hour-slots.length * 48px;
+
+                            VerticalLayout {
+                                min-width: 56px;
+                                max-width: 56px;
+                                preferred-width: 56px;
+                                spacing: 0px;
+                                for slot in root.hour-slots: Rectangle {
+                                    height: 48px;
+                                    Text {
+                                        text: slot.label;
+                                        color: Theme.muted;
+                                        font-size: 10px;
+                                        width: 100%;
+                                        height: 100%;
+                                        horizontal-alignment: right;
+                                        vertical-alignment: top;
+                                    }
+                                    Rectangle {
+                                        y: 0;
+                                        width: 100%;
+                                        height: 1px;
+                                        background: Theme.surface-press;
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                min-width: Theme.pad-sm;
+                                max-width: Theme.pad-sm;
+                                preferred-width: Theme.pad-sm;
+                            }
+                            HorizontalLayout {
+                                spacing: root.view-unit == 1 ? 3px : 0px;
+                                horizontal-stretch: 1;
+                                for cell[d] in main-days: Rectangle {
+                                    min-width: 0px;
+                                    preferred-width: 0px;
+                                    horizontal-stretch: 1;
+                                    min-height: root.hour-slots.length * 48px;
+                                    clip: true;
+                                    background: root.shade-weekends && cell.is-weekend ? Theme.weekend-fill : Theme.bg;
+                                    border-width: 1px;
+                                    border-color: Theme.stroke;
+                                    VerticalLayout {
+                                        width: 100%;
+                                        spacing: 0px;
+                                        for slot in root.hour-slots: TouchArea {
+                                            height: 48px;
+                                            clicked => {
+                                                if cell.date-key != "" {
+                                                    root.open-create-event(cell.date-key, slot.start-mins);
+                                                }
+                                            }
+                                            Rectangle {
+                                                background: parent.pressed ? Theme.surface-press : transparent;
+                                                Rectangle {
+                                                    y: 0;
+                                                    width: 100%;
+                                                    height: 1px;
+                                                    background: Theme.stroke;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // One pass over this day's events, placed by hour slot (above the slot TouchAreas).
+                                    for e in cell.events: TouchArea {
+                                        property <bool> in-grid: !e.all-day
+                                            && e.start-mins >= root.grid-start && e.start-mins < root.grid-end;
+                                        property <int> limit: e.slot-total > root.timed-max
+                                            ? max(0, root.timed-max - 1) : e.slot-total;
+                                        visible: in-grid && e.slot-ord < limit;
+                                        x: 2px;
+                                        y: floor((e.start-mins - root.grid-start) / root.grid-step) * 48px
+                                            + 2px + e.slot-ord * (root.timed-chip-h + 2px);
+                                        width: parent.width - 4px;
+                                        height: root.timed-chip-h;
+                                        clicked => { root.open-event-uid(cell.date-key, e.uid); }
+                                        EventChip {
+                                            title: e.title;
+                                            time-text: e.time-short;
+                                            event-color: e.color;
+                                            show-time: root.show-event-time;
+                                            compact: !root.show-event-time;
+                                        }
+                                    }
+                                    for e in cell.events: Text {
+                                        visible: !e.all-day && e.slot-ord == 0 && e.slot-total > root.timed-max
+                                            && e.start-mins >= root.grid-start && e.start-mins < root.grid-end;
+                                        x: 6px;
+                                        y: floor((e.start-mins - root.grid-start) / root.grid-step) * 48px
+                                            + 2px + (root.timed-max - 1) * (root.timed-chip-h + 2px);
+                                        width: parent.width - 8px;
+                                        height: 16px;
+                                        text: "+" + (e.slot-total - max(0, root.timed-max - 1)) + " more";
+                                        color: Theme.muted;
+                                        font-size: 10px;
+                                        font-weight: 500;
+                                        vertical-alignment: center;
+                                    }
+                                    // Danger-red now-lollipop on today's column
+                                    if cell.is-today && root.hour-slots.length > 0
+                                        && root.now-mins >= root.hour-slots[0].start-mins
+                                        && root.now-mins <= root.hour-slots[root.hour-slots.length - 1].end-mins: Rectangle {
+                                        property <int> slot-span: root.hour-slots[0].end-mins - root.hour-slots[0].start-mins;
+                                        property <length> y-pos: slot-span > 0
+                                            ? (root.now-mins - root.hour-slots[0].start-mins) * 48px / slot-span
+                                            : 0px;
+                                        y: y-pos - 5px;
+                                        height: 10px;
+                                        width: 100%;
+                                        background: transparent;
+                                        Rectangle {
+                                            width: 10px;
+                                            height: 10px;
+                                            border-radius: 5px;
+                                            background: Theme.danger;
+                                            x: 0;
+                                            y: 0;
+                                        }
+                                        Rectangle {
+                                            x: 5px;
+                                            y: 4px;
+                                            width: parent.width - 5px;
+                                            height: 2px;
+                                            background: Theme.danger;
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            Text {
-                text: root.agenda-date;
-                color: Theme.text;
-                font-size: 18px;
-                font-weight: 600;
-            }
-
-            for a in agenda: HorizontalLayout {
-                spacing: Theme.pad-sm;
-                min-height: 40px;
-                Rectangle {
-                    width: 6px; height: 100%;
-                    background: Theme.accent;
-                    border-radius: 3px;
+                // Month view — fixed equal columns under Sun–Sat header
+                if view-unit == 2: VerticalLayout {
+                    width: 100%;
+                    height: 100%;
+                    spacing: Theme.pad-sm;
+                    padding: 0;
+                    for m in view-count: MonthGrid {
+                        week-labels: root.grid-labels;
+                        days: root.main-days;
+                        columns: root.grid-columns;
+                        rows: root.month-rows;
+                        offset: m * root.month-rows * root.grid-columns;
+                        shade-weekends: root.shade-weekends;
+                        vertical-stretch: 1;
+                        select-date(k) => { root.select-date(k); }
+                    }
                 }
-                Text { text: a.time; color: Theme.muted; font-size: 14px; width: 72px; vertical-alignment: center; }
-                Text { text: a.title; color: Theme.text; font-size: 16px; vertical-alignment: center; }
+
+                // Year view
+                if view-unit == 3: Flickable {
+                    width: 100%;
+                    height: 100%;
+                    content-width: parent.width;
+                    VerticalLayout {
+                        spacing: Theme.pad;
+                        padding: Theme.pad-sm;
+                        for y in view-count: VerticalLayout {
+                            spacing: Theme.pad-sm;
+                            for row in 4: HorizontalLayout {
+                                spacing: Theme.pad-sm;
+                                for col in 3: MiniMonth {
+                                    property <int> mi: y * 12 + row * 3 + col;
+                                    title: mi < root.year-month-titles.length
+                                        ? root.year-month-titles[mi] : "";
+                                    week-labels: root.grid-labels;
+                                    days: root.main-days;
+                                    columns: root.grid-columns;
+                                    offset: mi * 6 * root.grid-columns;
+                                    horizontal-stretch: 1;
+                                    select-date(k) => { root.select-date(k); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Agenda — chronological list grouped by day (main-days already filtered to event days)
+                if view-unit == 4: Flickable {
+                    width: 100%;
+                    height: 100%;
+                    content-width: parent.width;
+                    VerticalLayout {
+                        padding: Theme.pad;
+                        spacing: Theme.pad;
+                        alignment: start;
+                        for cell in main-days: VerticalLayout {
+                            spacing: Theme.pad-sm;
+                            HorizontalLayout {
+                                spacing: Theme.pad-sm;
+                                cross-axis-alignment: center;
+                                Text {
+                                    text: cell.label;
+                                    color: Theme.text;
+                                    font-size: Theme.font-body;
+                                    font-weight: 700;
+                                    horizontal-stretch: 1;
+                                }
+                                if cell.is-today: Text {
+                                    text: "Today";
+                                    color: Theme.accent;
+                                    font-size: Theme.font-caption;
+                                    font-weight: 600;
+                                }
+                            }
+                            for e in cell.events: TouchArea {
+                                clicked => { root.open-event-uid(cell.date-key, e.uid); }
+                                EventChip {
+                                    title: e.title;
+                                    time-text: e.time-short;
+                                    event-color: e.color;
+                                    all-day: e.all-day;
+                                    show-time: true;
+                                    compact: false;
+                                    min-width: 0px;
+                                    preferred-width: 0px;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                            TouchArea {
+                                min-height: 28px;
+                                clicked => {
+                                    if cell.date-key != "" { root.select-date(cell.date-key); }
+                                }
+                                Text {
+                                    text: "Open day…";
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                }
+                            }
+                            Rectangle {
+                                height: 1px;
+                                background: Theme.stroke;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                    }
+                }
+                }
+            }
+        }
+    }
+
+    // Day modal overlay (month/year) — all-day then hourly slots
+    if day-modal-open: TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 50;
+        clicked => { root.close-day-modal(); }
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Theme.dim;
+        }
+        TouchArea {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(520px, parent.width - 48px);
+            height: min(640px, parent.height - 48px);
+            clicked => { }
+            Rectangle {
+                background: Theme.surface;
+                border-radius: Theme.radius;
+                border-width: 1px;
+                border-color: Theme.stroke;
+                VerticalLayout {
+                    padding: Theme.pad;
+                    spacing: Theme.pad-sm;
+                    Text {
+                        text: root.day-modal-title;
+                        color: Theme.text;
+                        font-size: Theme.font-title;
+                        font-weight: 700;
+                    }
+                    Flickable {
+                        vertical-stretch: 1;
+                        content-width: parent.width;
+                        VerticalLayout {
+                            spacing: Theme.pad-sm;
+                            Text {
+                                text: "All day";
+                                color: Theme.muted;
+                                font-size: Theme.font-caption;
+                                font-weight: 600;
+                            }
+                            for e[ei] in day-events: TouchArea {
+                                visible: e.all-day;
+                                min-height: Theme.touch-min;
+                                clicked => { root.open-event(ei); }
+                                Rectangle {
+                                    background: parent.pressed ? Theme.surface-press : Theme.surface-2;
+                                    border-radius: Theme.radius;
+                                    HorizontalLayout {
+                                        padding: Theme.pad-sm;
+                                        spacing: Theme.pad-sm;
+                                        Rectangle {
+                                            width: 6px;
+                                            height: 100%;
+                                            background: e.color;
+                                            border-radius: 3px;
+                                        }
+                                        VerticalLayout {
+                                            spacing: 2px;
+                                            horizontal-stretch: 1;
+                                            Text {
+                                                text: e.title;
+                                                color: Theme.text;
+                                                font-size: Theme.font-body;
+                                            }
+                                            if e.calendar != "": Text {
+                                                text: e.calendar;
+                                                color: Theme.muted;
+                                                font-size: Theme.font-caption;
+                                            }
+                                        }
+                                        if e.icon != "": EventIcon {
+                                            id: e.icon;
+                                            size: Theme.font-body;
+                                            tone: e.color;
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle { height: 1px; background: Theme.surface-press; }
+                            for slot in root.day-hour-buckets: VerticalLayout {
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    spacing: Theme.pad-sm;
+                                    Text {
+                                        text: slot.label;
+                                        color: Theme.muted;
+                                        font-size: Theme.font-caption;
+                                        font-weight: 600;
+                                        min-width: 64px;
+                                        vertical-alignment: top;
+                                    }
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        horizontal-stretch: 1;
+                                        for e[ei] in day-events: TouchArea {
+                                            visible: !e.all-day
+                                                && e.start-mins >= slot.start-mins
+                                                && e.start-mins < slot.end-mins;
+                                            min-height: Theme.touch-min;
+                                            clicked => { root.open-event(ei); }
+                                            Rectangle {
+                                                background: parent.pressed ? Theme.surface-press : Theme.surface-2;
+                                                border-radius: Theme.radius;
+                                                HorizontalLayout {
+                                                    padding: Theme.pad-sm;
+                                                    spacing: Theme.pad-sm;
+                                                    Rectangle {
+                                                        width: 6px;
+                                                        height: 100%;
+                                                        background: e.color;
+                                                        border-radius: 3px;
+                                                    }
+                                                    VerticalLayout {
+                                                        spacing: 2px;
+                                                        horizontal-stretch: 1;
+                                                        Text {
+                                                            text: e.time;
+                                                            color: Theme.muted;
+                                                            font-size: Theme.font-caption;
+                                                        }
+                                                        Text {
+                                                            text: e.title;
+                                                            color: Theme.text;
+                                                            font-size: Theme.font-body;
+                                                        }
+                                                        if e.calendar != "": Text {
+                                                            text: e.calendar;
+                                                            color: Theme.muted;
+                                                            font-size: Theme.font-caption;
+                                                        }
+                                                    }
+                                                    if e.icon != "": EventIcon {
+                                                        id: e.icon;
+                                                        size: Theme.font-body;
+                                                        tone: e.color;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.pad-sm;
+                        alignment: end;
+                        Button {
+                            label: "New event";
+                            role: "primary";
+                            activate => {
+                                if root.selected-date-key != "" {
+                                    root.open-create-event(root.selected-date-key, 9 * 60);
+                                }
+                            }
+                        }
+                        Button {
+                            label: "Close";
+                            role: "secondary";
+                            activate => { root.close-day-modal(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // First-run: name the built-in local calendar
+    if name-local-open: TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 90;
+        clicked => { }
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Theme.dim;
+        }
+        TouchArea {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(420px, parent.width - 48px);
+            clicked => { }
+            Rectangle {
+                background: Theme.surface;
+                border-radius: Theme.radius;
+                VerticalLayout {
+                    padding: Theme.pad;
+                    spacing: Theme.pad;
+                    Text {
+                        text: "Name your local calendar";
+                        color: Theme.text;
+                        font-size: Theme.font-title;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: "This on-device calendar is the default for new events. It stays on this device and cannot be shared.";
+                        color: Theme.muted;
+                        font-size: Theme.font-body;
+                        wrap: word-wrap;
+                    }
+                    Field {
+                        caption: "Calendar name";
+                        tip: "Shown as type Local in settings and on events you create.";
+                        text <=> root.name-local-draft;
+                        edited => { root.name-local-set(root.name-local-draft); }
+                    }
+                    Text {
+                        text: "Type: Local";
+                        color: Theme.muted;
+                        font-size: Theme.font-caption;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.pad-sm;
+                        alignment: end;
+                        Button {
+                            label: "Continue";
+                            role: "primary";
+                            activate => { root.name-local-save(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Create event on local calendar
+    if create-event-open: TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 70;
+        clicked => { root.close-create-event(); }
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Theme.dim;
+        }
+        TouchArea {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(440px, parent.width - 48px);
+            clicked => { }
+            Rectangle {
+                background: Theme.surface;
+                border-radius: Theme.radius;
+                VerticalLayout {
+                    padding: Theme.pad;
+                    spacing: Theme.pad;
+                    Text {
+                        text: "New event";
+                        color: Theme.text;
+                        font-size: Theme.font-title;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: root.create-date-label;
+                        color: Theme.muted;
+                        font-size: Theme.font-body;
+                    }
+                    Field {
+                        caption: "Title";
+                        tip: "Saved to your local calendar.";
+                        text <=> root.create-title;
+                        edited => { root.create-set-title(root.create-title); }
+                    }
+                    Text {
+                        text: "Calendar: " + root.create-calendar-name + " (Local)";
+                        color: Theme.muted;
+                        font-size: Theme.font-caption;
+                    }
+                    Switch {
+                        label: "All day";
+                        checked: root.create-all-day;
+                        tip: "All-day events sit in the all-day row.";
+                        toggled => { root.create-set-all-day(!root.create-all-day); }
+                    }
+                    if !root.create-all-day: HorizontalLayout {
+                        spacing: Theme.pad-sm;
+                        alignment: stretch;
+                        cross-axis-alignment: center;
+                        Text {
+                            text: "Start " + root.create-start-label;
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            horizontal-stretch: 1;
+                        }
+                        Button {
+                            label: "−";
+                            role: "secondary";
+                            square: true;
+                            activate => { root.create-set-start-mins(root.create-start-mins - 30); }
+                        }
+                        Button {
+                            label: "+";
+                            role: "secondary";
+                            square: true;
+                            activate => { root.create-set-start-mins(root.create-start-mins + 30); }
+                        }
+                    }
+                    if !root.create-all-day: HorizontalLayout {
+                        spacing: Theme.pad-sm;
+                        alignment: stretch;
+                        cross-axis-alignment: center;
+                        Text {
+                            text: "End " + root.create-end-label;
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            horizontal-stretch: 1;
+                        }
+                        Button {
+                            label: "−";
+                            role: "secondary";
+                            square: true;
+                            activate => { root.create-set-end-mins(root.create-end-mins - 30); }
+                        }
+                        Button {
+                            label: "+";
+                            role: "secondary";
+                            square: true;
+                            activate => { root.create-set-end-mins(root.create-end-mins + 30); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.pad-sm;
+                        alignment: end;
+                        Button {
+                            label: "Cancel";
+                            role: "secondary";
+                            activate => { root.close-create-event(); }
+                        }
+                        Button {
+                            label: "Create";
+                            role: "primary";
+                            activate => { root.create-save(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Event detail
+    if event-detail-open: TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 60;
+        clicked => { root.close-event-detail(); }
+        Rectangle { width: 100%; height: 100%; background: Theme.dim; }
+        TouchArea {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(480px, parent.width - 48px);
+            height: min(420px, parent.height - 48px);
+            clicked => { }
+            Rectangle {
+                background: Theme.surface;
+                border-radius: Theme.radius;
+                VerticalLayout {
+                    padding: Theme.pad;
+                    spacing: Theme.pad;
+                    Text {
+                        text: detail-event.title;
+                        color: Theme.text;
+                        font-size: Theme.font-title;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: detail-event.time;
+                        color: Theme.muted;
+                        font-size: Theme.font-body;
+                    }
+                    Text {
+                        text: detail-event.calendar;
+                        color: Theme.muted;
+                        font-size: Theme.font-caption;
+                    }
+                    if detail-event.description != "": Text {
+                        text: detail-event.description;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        wrap: word-wrap;
+                    }
+                    if detail-custom-summary != "": Text {
+                        text: detail-custom-summary;
+                        color: Theme.muted;
+                        font-size: Theme.font-caption;
+                        wrap: word-wrap;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        HorizontalLayout {
+                            spacing: Theme.pad-sm;
+                            Button {
+                                label: "Edit";
+                                role: "secondary";
+                                active: detail-event.writable;
+                                activate => { root.open-edit(); }
+                            }
+                            Button {
+                                label: "Customize";
+                                role: "primary";
+                                activate => { root.open-customize(); }
+                            }
+                            Button {
+                                label: "Close";
+                                role: "secondary";
+                                activate => { root.close-event-detail(); }
+                            }
+                        }
+                        if !detail-event.writable: Text {
+                            text: "Edit is unavailable — this feed is read-only.";
+                            color: Theme.muted;
+                            font-size: Theme.font-caption;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Customize sheet
+    if customize-open: TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 70;
+        clicked => { root.close-customize(); }
+        Rectangle { width: 100%; height: 100%; background: Theme.dim; }
+        TouchArea {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(520px, parent.width - 48px);
+            height: min(640px, parent.height - 48px);
+            clicked => { }
+            Rectangle {
+                background: Theme.surface;
+                border-radius: Theme.radius;
+                VerticalLayout {
+                    padding: Theme.pad;
+                    spacing: Theme.pad-sm;
+                    Text {
+                        text: "Customize";
+                        color: Theme.text;
+                        font-size: Theme.font-title;
+                        font-weight: 700;
+                    }
+                    if customize-has-recurrence: HorizontalLayout {
+                        spacing: Theme.pad-sm;
+                        Button {
+                            label: "This occurrence";
+                            role: customize-occurrence ? "primary" : "secondary";
+                            activate => { root.customize-set-occurrence(true); }
+                        }
+                        Button {
+                            label: "All occurrences";
+                            role: !customize-occurrence ? "primary" : "secondary";
+                            activate => { root.customize-set-occurrence(false); }
+                        }
+                    }
+                    Text { text: "Color"; color: Theme.muted; font-size: Theme.font-caption; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        for c in [
+                            { hex: "#3b82f6", brush: #3b82f6 },
+                            { hex: "#2563eb", brush: #2563eb },
+                            { hex: "#1d4ed8", brush: #1d4ed8 },
+                            { hex: "#ef4444", brush: #ef4444 },
+                            { hex: "#22c55e", brush: #22c55e },
+                            { hex: "#eab308", brush: #eab308 },
+                            { hex: "#a855f7", brush: #a855f7 },
+                            { hex: "#f97316", brush: #f97316 },
+                        ]: TouchArea {
+                            width: 40px; height: 40px;
+                            clicked => { root.customize-set-color(c.hex); }
+                            Rectangle {
+                                border-radius: 20px;
+                                background: c.brush;
+                                border-width: c.hex == root.customize-color ? 3px : 0;
+                                border-color: Theme.text;
+                            }
+                        }
+                    }
+                    Text { text: "Icon"; color: Theme.muted; font-size: Theme.font-caption; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        for ic in ["", "dot", "star", "flag", "bell", "pin"]: TouchArea {
+                            min-width: Theme.touch-min;
+                            min-height: Theme.touch-min;
+                            clicked => { root.customize-set-icon(ic); }
+                            Rectangle {
+                                background: ic == root.customize-icon ? Theme.accent : Theme.surface-2;
+                                border-radius: Theme.radius;
+                                EventIcon {
+                                    id: ic;
+                                    size: Theme.font-body;
+                                    tone: ic == root.customize-icon ? Theme.text-on-accent : Theme.text;
+                                    width: 100%;
+                                    height: 100%;
+                                }
+                            }
+                        }
+                    }
+                    Flickable {
+                        vertical-stretch: 1;
+                        content-width: parent.width;
+                        VerticalLayout {
+                            spacing: Theme.pad-sm;
+                            for f in customize-fields: VerticalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: f.name;
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                }
+                                if f.field-type == 2: TouchArea {
+                                    min-height: Theme.touch-min;
+                                    clicked => {
+                                        root.customize-set-field(f.id, f.value == "true" ? "false" : "true");
+                                    }
+                                    Rectangle {
+                                        background: Theme.surface-2;
+                                        border-radius: Theme.radius;
+                                        Text {
+                                            text: f.value == "true" ? "Yes" : "No";
+                                            color: Theme.text;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: center;
+                                            width: 100%; height: 100%;
+                                        }
+                                    }
+                                }
+                                if f.field-type != 2: Rectangle {
+                                    min-height: f.field-type == 1 ? 80px : Theme.touch-min;
+                                    background: Theme.surface-2;
+                                    border-radius: Theme.radius;
+                                    HorizontalLayout {
+                                        padding: 8px;
+                                        TextInput {
+                                            text: f.value;
+                                            color: Theme.text;
+                                            font-size: Theme.font-body;
+                                            single-line: f.field-type != 1;
+                                            wrap: word-wrap;
+                                            edited => { root.customize-set-field(f.id, self.text); }
+                                            horizontal-stretch: 1;
+                                            vertical-stretch: 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.pad-sm;
+                        Button {
+                            label: "Save";
+                            role: "primary";
+                            activate => { root.customize-save(); }
+                        }
+                        Button {
+                            label: "Cancel";
+                            role: "secondary";
+                            activate => { root.close-customize(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if edit-placeholder-open: TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 80;
+        clicked => { root.close-edit-placeholder(); }
+        Rectangle { width: 100%; height: 100%; background: Theme.dim; }
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 400px;
+            height: 200px;
+            background: Theme.surface;
+            border-radius: Theme.radius;
+            VerticalLayout {
+                padding: Theme.pad;
+                spacing: Theme.pad;
+                Text {
+                    text: "Edit event";
+                    color: Theme.text;
+                    font-size: Theme.font-title;
+                    font-weight: 700;
+                }
+                Text {
+                    text: "Editing this calendar is not connected yet.";
+                    color: Theme.muted;
+                    font-size: Theme.font-body;
+                    wrap: word-wrap;
+                }
+                Button {
+                    label: "Close";
+                    role: "secondary";
+                    activate => { root.close-edit-placeholder(); }
+                }
             }
         }
     }

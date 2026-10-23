@@ -1,0 +1,803 @@
+import { Theme } from "../theme.slint";
+import { Icons, FaIcon } from "../icons.slint";
+
+// role: "primary" | "secondary" | "danger"
+// Content-sized pill — hug the label; do not stretch to fill the parent.
+export component Button inherits TouchArea {
+    in property <string> label;
+    in property <string> role: "secondary";
+    in property <bool> square: false;
+    in property <bool> active: true;
+    callback activate;
+
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    height: Theme.touch-min;
+    min-width: square ? Theme.touch-min : 0px;
+    opacity: active ? 1.0 : 0.45;
+    enabled: active;
+
+    HorizontalLayout {
+        padding-left: square ? 0 : 4px;
+        padding-right: square ? 0 : 4px;
+        padding-top: square ? 0 : 6px;
+        padding-bottom: square ? 0 : 6px;
+        alignment: center;
+
+        Rectangle {
+            min-width: square ? Theme.touch-min : 0px;
+            background: root.pressed && root.active
+                ? (root.role == "primary" ? Theme.accent-press
+                    : root.role == "danger" ? Theme.danger-press
+                    : Theme.surface-press)
+                : (root.role == "primary" ? Theme.accent
+                    : root.role == "danger" ? Theme.danger
+                    : Theme.surface-2);
+            border-radius: square ? Theme.radius : 999px;
+            border-width: root.role == "secondary" ? 1px : 0;
+            border-color: Theme.surface-press;
+
+            HorizontalLayout {
+                padding-left: square ? 0 : 16px;
+                padding-right: square ? 0 : 16px;
+                min-height: square ? Theme.touch-min : 36px;
+                min-width: square ? Theme.touch-min : 0px;
+                alignment: center;
+                Text {
+                    text: root.label;
+                    color: root.role == "secondary" ? Theme.text : Theme.text-on-accent;
+                    font-size: Theme.font-body;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+
+    clicked => { if root.active { root.activate(); } }
+}
+
+export component IconButton inherits TouchArea {
+    /// Font Awesome glyph from `Icons.*`. Leave empty when using `icon`.
+    in property <string> glyph: "";
+    /// Optional monochrome image (e.g. outline gear); used when `glyph` is empty.
+    in property <image> icon;
+    in property <bool> active: true;
+    callback activate;
+
+    min-height: Theme.touch-min;
+    min-width: Theme.touch-min;
+    opacity: active ? 1.0 : 0.45;
+    enabled: active;
+
+    Rectangle {
+        background: root.pressed && root.active ? Theme.surface-press : transparent;
+        border-radius: Theme.radius;
+        if root.glyph != "": FaIcon {
+            glyph: root.glyph;
+            size: 22px;
+            tone: Theme.text;
+            width: 100%;
+            height: 100%;
+        }
+        if root.glyph == "": Image {
+            source: root.icon;
+            width: 22px;
+            height: 22px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            colorize: Theme.text;
+            image-fit: contain;
+        }
+    }
+
+    clicked => { if root.active { root.activate(); } }
+}
+
+/// Pill-shaped action button (matches ViewPill chrome).
+export component PillButton inherits TouchArea {
+    in property <string> label: "";
+    callback activate;
+
+    min-height: Theme.touch-min;
+    min-width: 96px;
+
+    // Visual pill inset from the touch target / header chrome.
+    Rectangle {
+        x: 4px;
+        y: 6px;
+        width: parent.width - 8px;
+        height: parent.height - 12px;
+        border-radius: (parent.height - 12px) / 2;
+        background: root.pressed ? Theme.surface-press : Theme.surface-2;
+        border-width: 1px;
+        border-color: Theme.surface-press;
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            alignment: center;
+            Text {
+                text: root.label;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                font-weight: 600;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+
+    clicked => { root.activate(); }
+}
+
+/// Floating pill dropdown for preset view selection (Day / Week / Month / Year).
+export component ViewPill inherits TouchArea {
+    in property <string> label: "";
+    in property <int> selected: 0;
+    in property <[string]> options;
+    callback changed(int);
+
+    min-height: Theme.touch-min;
+    min-width: Theme.preset-pill-width;
+    max-width: Theme.preset-pill-width;
+    preferred-width: Theme.preset-pill-width;
+
+    // Visual pill inset from the touch target / header chrome.
+    Rectangle {
+        x: 4px;
+        y: 6px;
+        width: parent.width - 8px;
+        height: parent.height - 12px;
+        border-radius: (parent.height - 12px) / 2;
+        background: root.pressed ? Theme.surface-press : Theme.surface-2;
+        border-width: 1px;
+        border-color: Theme.surface-press;
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 12px;
+            spacing: 10px;
+            alignment: center;
+            Text {
+                text: root.label;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                font-weight: 600;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            FaIcon {
+                glyph: Icons.chevron-down;
+                size: 12px;
+                tone: Theme.muted;
+            }
+        }
+    }
+
+    clicked => { menu.show(); }
+
+    menu := PopupWindow {
+        x: 0;
+        y: root.height + 6px;
+        width: max(root.width, 168px);
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            background: Theme.surface;
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: Theme.surface-2;
+
+            VerticalLayout {
+                padding: 6px;
+                spacing: 2px;
+                for opt[i] in root.options: TouchArea {
+                    min-height: Theme.touch-min;
+                    clicked => {
+                        root.changed(i);
+                        menu.close();
+                    }
+                    Rectangle {
+                        background: parent.pressed ? Theme.surface-press
+                            : (i == root.selected ? Theme.accent : transparent);
+                        border-radius: 14px;
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            Text {
+                                text: opt;
+                                color: i == root.selected ? Theme.text-on-accent : Theme.text;
+                                font-size: Theme.font-body;
+                                font-weight: i == root.selected ? 600 : 400;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                height: 100%;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Touch-friendly ⓘ tip — tap to show help (PopupWindow).
+export component InfoTip inherits TouchArea {
+    in property <string> text: "";
+
+    width: Theme.touch-min;
+    height: Theme.touch-min;
+
+    FaIcon {
+        glyph: Icons.circle-info;
+        size: 18px;
+        tone: parent.pressed ? Theme.accent : Theme.muted;
+        width: 100%;
+        height: 100%;
+    }
+
+    clicked => { if root.text != "" { tip.show(); } }
+
+    tip := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: 300px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Theme.surface;
+            border-radius: Theme.radius;
+            border-width: 1px;
+            border-color: Theme.surface-2;
+            VerticalLayout {
+                padding: Theme.pad-sm;
+                Text {
+                    text: root.text;
+                    color: Theme.text;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                    width: parent.width - 2 * Theme.pad-sm;
+                }
+            }
+        }
+    }
+}
+
+export component Field inherits VerticalLayout {
+    in property <string> caption;
+    in property <string> tip: "";
+    in-out property <string> text;
+    callback edited();
+    spacing: 4px;
+
+    HorizontalLayout {
+        spacing: 4px;
+        alignment: stretch;
+        cross-axis-alignment: center;
+        Text {
+            text: root.caption;
+            color: Theme.muted;
+            font-size: Theme.font-caption;
+            vertical-alignment: center;
+            horizontal-alignment: left;
+            horizontal-stretch: 1;
+        }
+        if tip != "": InfoTip { text: root.tip; }
+    }
+    Rectangle {
+        min-height: Theme.touch-min;
+        background: Theme.surface;
+        border-radius: Theme.radius;
+        border-width: field-input.has-focus ? 2px : 0;
+        border-color: Theme.accent;
+        HorizontalLayout {
+            padding: Theme.pad-sm;
+            alignment: stretch;
+            field-input := TextInput {
+                text <=> root.text;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                single-line: true;
+                horizontal-alignment: left;
+                vertical-stretch: 1;
+                edited => { root.edited(); }
+            }
+        }
+    }
+}
+
+export component LongField inherits VerticalLayout {
+    in property <string> caption;
+    in-out property <string> text;
+    spacing: 4px;
+
+    Text {
+        text: root.caption;
+        color: Theme.muted;
+        font-size: Theme.font-caption;
+    }
+    Rectangle {
+        min-height: 96px;
+        background: Theme.surface;
+        border-radius: Theme.radius;
+        border-width: field-input.has-focus ? 2px : 0;
+        border-color: Theme.accent;
+        VerticalLayout {
+            padding: Theme.pad-sm;
+            field-input := TextInput {
+                text <=> root.text;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                single-line: false;
+                wrap: word-wrap;
+                vertical-stretch: 1;
+            }
+        }
+    }
+}
+
+// mark: "" | "check" | "color"
+export component Row inherits TouchArea {
+    in property <string> title;
+    in property <string> caption: "";
+    in property <string> mark: "";
+    in property <bool> checked: false;
+    in property <color> mark-color: Theme.accent;
+    callback activate;
+
+    min-height: Theme.touch-min;
+
+    Rectangle {
+        background: root.pressed ? Theme.surface-press : Theme.surface;
+        border-radius: Theme.radius;
+        HorizontalLayout {
+            padding: Theme.pad;
+            spacing: Theme.pad;
+            alignment: stretch;
+            cross-axis-alignment: center;
+            if mark == "check": Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: Theme.radius;
+                border-width: 2px;
+                border-color: Theme.accent;
+                background: root.checked ? Theme.accent : transparent;
+                if root.checked: FaIcon {
+                    glyph: Icons.check;
+                    size: 14px;
+                    tone: Theme.text-on-accent;
+                    width: 100%;
+                    height: 100%;
+                }
+            }
+            if mark == "color": Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: Theme.radius;
+                background: root.mark-color;
+            }
+            VerticalLayout {
+                spacing: 4px;
+                alignment: start;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.title;
+                    color: Theme.text;
+                    font-size: Theme.font-body;
+                    horizontal-alignment: left;
+                }
+                if caption != "": Text {
+                    text: root.caption;
+                    color: Theme.muted;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                    horizontal-alignment: left;
+                }
+            }
+        }
+    }
+
+    clicked => { root.activate(); }
+}
+
+// kind: 0 idle/muted, 1 ok, 2 accent, 3 danger
+export component Banner inherits Rectangle {
+    in property <string> message: "";
+    in property <int> kind: 0;
+    visible: message != "";
+    height: message == "" ? 0px : self.preferred-height;
+    HorizontalLayout {
+        padding-top: 6px;
+        padding-bottom: 6px;
+        Text {
+            text: root.message;
+            color: root.kind == 1 ? Theme.ok
+                : root.kind == 2 ? Theme.accent
+                : root.kind == 3 ? Theme.danger
+                : Theme.muted;
+            font-size: Theme.font-caption;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            horizontal-alignment: left;
+        }
+    }
+}
+
+/// Label and info on the left, the control on the right, empty space between.
+/// `alignment: stretch` is required: center/start ignore `horizontal-stretch`.
+export component SettingRow inherits HorizontalLayout {
+    in property <string> label: "";
+    in property <string> tip: "";
+
+    spacing: 4px;
+    alignment: stretch;
+    cross-axis-alignment: center;
+    min-height: Theme.touch-min;
+    min-width: 0px;
+    horizontal-stretch: 1;
+
+    if root.label != "": Text {
+        text: root.label;
+        color: Theme.muted;
+        font-size: Theme.font-body;
+        vertical-alignment: center;
+        horizontal-alignment: left;
+        min-width: 0px;
+        overflow: elide;
+    }
+    if root.tip != "": InfoTip { text: root.tip; }
+    Rectangle { horizontal-stretch: 1; }
+    @children
+}
+
+/// Hairline between settings rows — inset so it doesn’t meet section edges.
+export component SettingsDivider inherits HorizontalLayout {
+    padding-left: Theme.pad;
+    padding-right: Theme.pad;
+    height: 1px;
+    vertical-stretch: 0;
+
+    Rectangle {
+        height: 1px;
+        horizontal-stretch: 1;
+        background: Theme.stroke;
+    }
+}
+
+/// Right-aligned text box. Wider than a switch or a two-digit count.
+export component ShortInput inherits Rectangle {
+    in-out property <string> text: "";
+    in property <length> box-width: 220px;
+    in property <int> font-weight: 400;
+    callback edited();
+
+    // Preferred size is the designed box. Shrinks so the row stays inside the panel.
+    min-width: 96px;
+    max-width: root.box-width;
+    preferred-width: root.box-width;
+    min-height: Theme.touch-min;
+    vertical-stretch: 0;
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.surface-2;
+
+    HorizontalLayout {
+        padding-left: Theme.pad-sm;
+        padding-right: Theme.pad-sm;
+        input := TextInput {
+            text <=> root.text;
+            color: Theme.text;
+            font-size: Theme.font-body;
+            font-weight: root.font-weight;
+            single-line: true;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            edited => { root.edited(); }
+        }
+    }
+}
+
+export component Switch inherits HorizontalLayout {
+    in-out property <bool> checked: false;
+    in property <string> label: "";
+    in property <string> tip: "";
+    callback toggled;
+
+    spacing: Theme.pad;
+    alignment: stretch;
+    cross-axis-alignment: center;
+    min-height: Theme.touch-min;
+
+    if label != "": Text {
+        text: root.label;
+        color: Theme.text;
+        font-size: Theme.font-body;
+        vertical-alignment: center;
+        horizontal-alignment: left;
+        horizontal-stretch: 1;
+    }
+    if tip != "": InfoTip { text: root.tip; }
+    TouchArea {
+        width: 56px;
+        height: Theme.touch-min;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            width: 56px;
+            height: 32px;
+            border-radius: 16px;
+            background: parent.pressed
+                ? (root.checked ? Theme.accent-press : Theme.surface-press)
+                : (root.checked ? Theme.accent : Theme.surface-2);
+            animate background { duration: 120ms; }
+            Rectangle {
+                x: root.checked ? parent.width - self.width - 4px : 4px;
+                y: (parent.height - self.height) / 2;
+                width: 24px;
+                height: 24px;
+                border-radius: 12px;
+                background: Theme.text-on-accent;
+                animate x { duration: 120ms; }
+            }
+        }
+    }
+}
+
+export component Dropdown inherits VerticalLayout {
+    in property <string> caption: "";
+    in property <string> tip: "";
+    in property <[string]> options;
+    in-out property <int> selected: 0;
+    /// Caption, info, and the selector share one row. The selector sits on the right.
+    in property <bool> inline: false;
+    /// Selector is only as wide as a two-digit count.
+    in property <bool> compact: false;
+    callback changed(int);
+
+    spacing: 4px;
+    horizontal-stretch: 1;
+    property <string> current: root.selected >= 0 && root.selected < root.options.length
+        ? root.options[root.selected] : "";
+    property <length> menu-height: min(root.options.length * (Theme.touch-min + 2px) + 8px, 320px);
+
+    if !root.inline && (root.caption != "" || root.tip != ""): HorizontalLayout {
+        spacing: 4px;
+        alignment: stretch;
+        cross-axis-alignment: center;
+        if root.caption != "": Text {
+            text: root.caption;
+            color: Theme.muted;
+            font-size: Theme.font-body;
+            vertical-alignment: center;
+            horizontal-alignment: left;
+        }
+        if root.tip != "": InfoTip { text: root.tip; }
+        Rectangle { horizontal-stretch: 1; }
+    }
+
+    HorizontalLayout {
+        spacing: 4px;
+        alignment: stretch;
+        cross-axis-alignment: center;
+        if root.inline && root.caption != "": Text {
+            text: root.caption;
+            color: Theme.muted;
+            font-size: Theme.font-body;
+            vertical-alignment: center;
+            horizontal-alignment: left;
+        }
+        if root.inline && root.tip != "": InfoTip { text: root.tip; }
+        if root.inline: Rectangle { horizontal-stretch: 1; }
+
+        ta := TouchArea {
+            min-height: Theme.touch-min;
+            horizontal-stretch: root.inline ? 0 : 1;
+            min-width: root.compact ? 72px : 96px;
+            preferred-width: root.compact ? 72px : 220px;
+            max-width: root.compact ? 72px : 280px;
+            clicked => {
+                if menu.is-open { menu.close(); } else { menu.show(); }
+            }
+            Rectangle {
+                background: ta.pressed ? Theme.surface-press : Theme.surface;
+                border-radius: Theme.radius;
+                border-width: 1px;
+                border-color: Theme.surface-2;
+                HorizontalLayout {
+                    padding-left: Theme.pad-sm;
+                    padding-right: Theme.pad-sm;
+                    spacing: 4px;
+                    alignment: center;
+                    Text {
+                        text: root.current;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                        horizontal-alignment: root.compact ? center : left;
+                        min-width: 0px;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    FaIcon {
+                        glyph: menu.is-open ? Icons.chevron-up : Icons.chevron-down;
+                        size: 12px;
+                        tone: Theme.muted;
+                    }
+                }
+            }
+
+            // Same pattern as ViewPill: the list is the popup's content, so it has a real height.
+            menu := PopupWindow {
+                x: ta.width - self.width;
+                y: ta.height + 4px;
+                width: max(ta.width, root.compact ? 72px : 220px);
+                height: root.menu-height;
+                close-policy: close-on-click-outside;
+
+                Rectangle {
+                    height: root.menu-height;
+                    background: Theme.surface;
+                    border-radius: Theme.radius;
+                    border-width: 1px;
+                    border-color: Theme.surface-2;
+                    clip: true;
+
+                    Flickable {
+                        width: 100%;
+                        height: 100%;
+                        content-width: self.width;
+                        content-height: options-list.preferred-height;
+
+                        options-list := VerticalLayout {
+                            padding: 4px;
+                            spacing: 2px;
+                            width: parent.width;
+                            for opt[i] in options: TouchArea {
+                                min-height: Theme.touch-min;
+                                clicked => {
+                                    root.selected = i;
+                                    menu.close();
+                                    root.changed(i);
+                                }
+                                Rectangle {
+                                    background: parent.pressed ? Theme.surface-press
+                                        : (i == root.selected ? Theme.accent : transparent);
+                                    border-radius: Theme.radius;
+                                    HorizontalLayout {
+                                        padding-left: Theme.pad-sm;
+                                        padding-right: Theme.pad-sm;
+                                        Text {
+                                            text: opt;
+                                            color: i == root.selected ? Theme.text-on-accent : Theme.text;
+                                            font-size: Theme.font-body;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: root.compact ? center : left;
+                                            horizontal-stretch: 1;
+                                            height: 100%;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Long-press / hover tip. Pure Slint state — no Rust round-trip.
+export component Tip inherits Rectangle {
+    in property <string> text: "";
+    in-out property <bool> show: false;
+    min-height: Theme.touch-min;
+
+    ta := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.show = !root.show; }
+        moved => {
+            if ta.has-hover { root.show = true; }
+        }
+        @children
+    }
+
+    if show && text != "": Rectangle {
+        y: parent.height + 4px;
+        z: 20;
+        background: Theme.surface-2;
+        border-radius: Theme.radius;
+        border-width: 1px;
+        border-color: Theme.surface;
+        HorizontalLayout {
+            padding: 6px;
+            Text {
+                text: root.text;
+                color: Theme.text;
+                font-size: Theme.font-caption;
+            }
+        }
+    }
+}
+
+struct ColorSwatch {
+    hex: string,
+    brush: color,
+}
+
+/// Color box. Click opens a swatch grid over the page; the box shows the chosen color.
+export component ColorBox inherits TouchArea {
+    in property <color> value: #3b82f6;
+    callback picked(string);
+
+    property <color> shown: root.value;
+    changed value => { root.shown = root.value; }
+
+    property <[ColorSwatch]> palette: [
+        { hex: "#7f1d1d", brush: #7f1d1d }, { hex: "#7c2d12", brush: #7c2d12 }, { hex: "#713f12", brush: #713f12 }, { hex: "#14532d", brush: #14532d }, { hex: "#134e4a", brush: #134e4a }, { hex: "#1e3a8a", brush: #1e3a8a }, { hex: "#581c87", brush: #581c87 }, { hex: "#831843", brush: #831843 },
+        { hex: "#b91c1c", brush: #b91c1c }, { hex: "#c2410c", brush: #c2410c }, { hex: "#a16207", brush: #a16207 }, { hex: "#15803d", brush: #15803d }, { hex: "#0f766e", brush: #0f766e }, { hex: "#1d4ed8", brush: #1d4ed8 }, { hex: "#7e22ce", brush: #7e22ce }, { hex: "#be185d", brush: #be185d },
+        { hex: "#ef4444", brush: #ef4444 }, { hex: "#f97316", brush: #f97316 }, { hex: "#eab308", brush: #eab308 }, { hex: "#22c55e", brush: #22c55e }, { hex: "#14b8a6", brush: #14b8a6 }, { hex: "#3b82f6", brush: #3b82f6 }, { hex: "#a855f7", brush: #a855f7 }, { hex: "#ec4899", brush: #ec4899 },
+        { hex: "#f87171", brush: #f87171 }, { hex: "#fb923c", brush: #fb923c }, { hex: "#facc15", brush: #facc15 }, { hex: "#4ade80", brush: #4ade80 }, { hex: "#2dd4bf", brush: #2dd4bf }, { hex: "#60a5fa", brush: #60a5fa }, { hex: "#c084fc", brush: #c084fc }, { hex: "#f472b6", brush: #f472b6 },
+        { hex: "#fecaca", brush: #fecaca }, { hex: "#fed7aa", brush: #fed7aa }, { hex: "#fef08a", brush: #fef08a }, { hex: "#bbf7d0", brush: #bbf7d0 }, { hex: "#99f6e4", brush: #99f6e4 }, { hex: "#bfdbfe", brush: #bfdbfe }, { hex: "#e9d5ff", brush: #e9d5ff }, { hex: "#fbcfe8", brush: #fbcfe8 },
+        { hex: "#000000", brush: #000000 }, { hex: "#1a2332", brush: #1a2332 }, { hex: "#334155", brush: #334155 }, { hex: "#64748b", brush: #64748b }, { hex: "#94a3b8", brush: #94a3b8 }, { hex: "#cbd5e1", brush: #cbd5e1 }, { hex: "#e7ecf3", brush: #e7ecf3 }, { hex: "#ffffff", brush: #ffffff },
+    ];
+
+    min-width: Theme.touch-min;
+    min-height: Theme.touch-min;
+    horizontal-stretch: 0;
+
+    Rectangle {
+        width: 36px;
+        height: 36px;
+        border-radius: 6px;
+        background: root.shown;
+        border-width: 2px;
+        border-color: menu.is-open ? Theme.text : Theme.surface-press;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+
+    clicked => { if menu.is-open { menu.close(); } else { menu.show(); } }
+
+    menu := PopupWindow {
+        x: root.width - self.width;
+        y: root.height + 4px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            background: Theme.surface;
+            border-radius: Theme.radius;
+            border-width: 1px;
+            border-color: Theme.surface-2;
+
+            VerticalLayout {
+                padding: 8px;
+                spacing: 6px;
+                for row in 6: HorizontalLayout {
+                    spacing: 6px;
+                    for col in 8: swatch := TouchArea {
+                        property <ColorSwatch> chip: root.palette[row * 8 + col];
+                        width: 36px;
+                        height: 36px;
+                        clicked => {
+                            root.shown = swatch.chip.brush;
+                            root.picked(swatch.chip.hex);
+                            menu.close();
+                        }
+                        Rectangle {
+                            border-radius: 6px;
+                            background: swatch.chip.brush;
+                            border-width: root.shown == swatch.chip.brush ? 3px : 1px;
+                            border-color: root.shown == swatch.chip.brush ? Theme.text : Theme.surface-press;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,13 +1,45 @@
+// Colors are applied from Config.palette via apply_theme (Rust).
 export global Theme {
+    in-out property <bool> is-dark: true;
+
+    in-out property <color> accent: #3b82f6;
+    in-out property <color> accent-press: #2563eb;
+    in-out property <color> danger: #ef4444;
+    in-out property <color> danger-press: #dc2626;
+    in-out property <color> ok: #22c55e;
+    in-out property <color> text-on-accent: #ffffff;
+    in-out property <color> bg: #0f1419;
+    in-out property <color> surface: #1a2332;
+    in-out property <color> surface-2: #243044;
+    in-out property <color> surface-press: #2a3850;
+    in-out property <color> text: #e7ecf3;
+    in-out property <color> muted: #8b9bb4;
+
+    out property <color> dim: is-dark ? #000000aa : #00000066;
+    out property <color> stroke: surface-2;
+    out property <color> weekend-fill: bg.mix(surface, 0.5);
+    /// Soft fill for selected day / selected week (not today’s accent circle).
+    out property <color> selection-fill: accent.mix(surface, 0.22);
+    out property <float> past-opacity: 0.28;
+    out property <length> event-bar: 3px;
+    out property <duration> motion-fast: 120ms;
+
     out property <length> touch-min: 48px;
     out property <length> pad: 16px;
     out property <length> pad-sm: 8px;
-    out property <color> bg: #0f1419;
-    out property <color> surface: #1a2332;
-    out property <color> surface-2: #243044;
-    out property <color> text: #e7ecf3;
-    out property <color> muted: #8b9bb4;
-    out property <color> accent: #3b82f6;
-    out property <color> danger: #ef4444;
-    out property <color> ok: #22c55e;
+    out property <length> radius: 8px;
+
+    /// Empty = platform default. Applied via Window.default-font-family.
+    in-out property <string> font-family: "";
+    /// Scales all Theme font tokens (Settings → Global).
+    in-out property <float> font-scale: 1.0;
+    out property <length> font-title: 28px * font-scale;
+    out property <length> font-body: 18px * font-scale;
+    out property <length> font-caption: 14px * font-scale;
+    out property <length> font-clock: 28px * font-scale;
+    out property <length> font-event: 15px * font-scale;
+
+    /// Dashboard preset pill. Name field is the label area inside it (padding, gap, chevron).
+    out property <length> preset-pill-width: font-body * 12;
+    out property <length> preset-name-width: preset-pill-width - 40px;
 }

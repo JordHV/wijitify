@@ -1,0 +1,38 @@
+// Throwaway preview notes for 0.3.0 visual pass (not wired into AppWindow).
+// Settled from dark baseline + light neutrals; radius 8; filled primary/danger, outlined secondary.
+
+import { Theme } from "./theme.slint";
+import { Icons } from "./icons.slint";
+import { Button, IconButton, Field, Row, Banner } from "./shell/kit.slint";
+
+export component ThemePreview inherits Window {
+    title: "Wijitify theme preview";
+    preferred-width: 900px;
+    preferred-height: 700px;
+    background: Theme.bg;
+
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.pad;
+        Text {
+            text: Theme.is-dark ? "Dark" : "Light";
+            color: Theme.text;
+            font-size: Theme.font-title;
+            font-weight: 700;
+        }
+        HorizontalLayout {
+            spacing: Theme.pad-sm;
+            Button { label: "Primary"; role: "primary"; }
+            Button { label: "Secondary"; role: "secondary"; }
+            Button { label: "Danger"; role: "danger"; }
+            IconButton { glyph: Icons.chevron-left; }
+            IconButton { glyph: Icons.refresh; }
+            IconButton { glyph: Icons.gear; }
+        }
+        Field { caption: "ICS URL"; text: "https://example.com/cal.ics"; }
+        Row { title: "Zalender"; caption: "Family calendar"; mark: "check"; checked: true; }
+        Row { title: "Holidays"; caption: "Public feed"; mark: "color"; mark-color: #3b82f6; }
+        Banner { message: "Added “Holidays”."; kind: 1; }
+        Banner { message: "Enter an ICS URL."; kind: 3; }
+    }
+}

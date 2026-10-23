@@ -40,17 +40,52 @@ Each module ships Slint **views** and a **setup page**. The shell switches by mo
 
 If `setup_complete` is false (or no config): pick modules → walk setup pages for selected modules → atomic save with `setup_complete = true` → start enabled modules → home.
 
-## Config shape (schema_version = 1)
+## Config shape (schema_version = 7)
 
 ```toml
-schema_version = 1
+schema_version = 7
 setup_complete = true
+theme = "dark" # or "light"; selecting a theme resets palette defaults
+accent = "#3b82f6" # mirrored from palette.accent
+datetime_format = "dd_mm_yy_am_pm"
+font_family = "system" # system | sans | serif | mono
+font_scale = "medium" # small | medium | large | x_large
+
+[palette]
+bg = "#0f1419"
+surface = "#1a2332"
+# … surface_2, surface_press, text, muted, accent, accent_press, danger, danger_press, ok, text_on_accent
 
 [modules.zalender]
 enabled = true
 timezone = "America/New_York"
 refresh_minutes = 15
-feeds = [{ name = "Family", url = "https://...", color = "#3b82f6" }]
+next_feed_id = 2
+week_start = "sunday"
+hot_preset_id = "preset-month"
+feeds = [{ id = "feed-1", name = "Family", url = "https://...", color = "#3b82f6", visible = true, writable = false }]
+
+# Built-in presets: day, week, month, year, agenda (count = weeks for agenda)
+[[modules.zalender.presets]]
+id = "preset-month"
+name = "Month"
+unit = "month"
+count = 1
+anchor = "current_first"
+builtin = true
+visible = true
+
+[modules.zalender.display]
+dim_past = true
+shade_weekends = true
+
+[modules.zalender.day_modal]
+show_time = true
+show_title = true
+show_calendar = true
+show_description = true
 ```
+
+Per-event customizations (color, icon, custom field values) live in `overrides.json` next to `config.toml`, not in the disposable ICS snapshot cache. See [customizationsmethod.txt](../customizationsmethod.txt).
 
 See [PRINCIPLES.md](PRINCIPLES.md) and [BRIEF.md](BRIEF.md) for product constraints.

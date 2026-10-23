@@ -1,29 +1,5 @@
 import { Theme } from "../theme.slint";
+import { Button } from "./kit.slint";
 
-export component NavButton inherits TouchArea {
-    in property <string> label;
-    in property <bool> active;
-    callback activate;
-
-    min-height: Theme.touch-min;
-    min-width: 120px;
-
-    Rectangle {
-        background: root.pressed ? Theme.surface-2 : (root.active ? Theme.surface-2 : transparent);
-        border-radius: 8px;
-        border-width: root.active ? 2px : 0;
-        border-color: Theme.accent;
-
-        Text {
-            text: root.label;
-            color: Theme.text;
-            font-size: 18px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            width: 100%;
-            height: 100%;
-        }
-    }
-
-    clicked => { root.activate(); }
-}
+// Thin alias kept for any leftover imports.
+export component NavButton inherits Button { }
