@@ -23,7 +23,7 @@ use crate::services::config::{
 };
 use crate::services::storage::Paths;
 use crate::services::tasks::TaskRuntime;
-use crate::services::update::{self, UpdateCmd, UpdateState};
+use crate::services::update::{self, status, UpdateCmd, UpdateState};
 
 #[allow(clippy::unwrap_used)]
 mod generated {
@@ -2708,10 +2708,10 @@ fn apply_update(ui: &AppWindow, state: &UpdateState) {
     ui.set_current_version(SharedString::from(env!("CARGO_PKG_VERSION")));
     match state {
         UpdateState::Unsupported => {
-            ui.set_update_status(0);
+            ui.set_update_status(status::UNSUPPORTED);
         }
         UpdateState::UpToDate { checked } => {
-            ui.set_update_status(1);
+            ui.set_update_status(status::UP_TO_DATE);
             ui.set_update_checked(SharedString::from(checked.as_str()));
         }
         UpdateState::Available {
@@ -2719,20 +2719,20 @@ fn apply_update(ui: &AppWindow, state: &UpdateState) {
             notes,
             checked,
         } => {
-            ui.set_update_status(2);
+            ui.set_update_status(status::AVAILABLE);
             ui.set_update_version(SharedString::from(version.as_str()));
             ui.set_update_notes(SharedString::from(notes.as_str()));
             ui.set_update_checked(SharedString::from(checked.as_str()));
         }
         UpdateState::Installing { percent } => {
-            ui.set_update_status(3);
+            ui.set_update_status(status::INSTALLING);
             ui.set_update_percent(*percent as i32);
         }
         UpdateState::ReadyToRestart => {
-            ui.set_update_status(4);
+            ui.set_update_status(status::READY_TO_RESTART);
         }
         UpdateState::Failed(message) => {
-            ui.set_update_status(5);
+            ui.set_update_status(status::FAILED);
             ui.set_update_error(SharedString::from(message.as_str()));
         }
     }
