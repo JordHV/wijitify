@@ -7,3 +7,11 @@ Before changing code, read:
 3. [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — Windows / VM / Surface workflows
 
 Cursor project rules under `.cursor/rules/` encode the same constraints for in-editor agents.
+
+## Release
+
+When asked to push and release a version, follow [docs/RELEASES.md](docs/RELEASES.md). Before any `git push` (main or tag), run on Linux:
+
+`python3 scripts/release-precheck.py vX.Y.Z`
+
+Exit 0 is required. Do not push if it fails. Never reuse a tag.

@@ -21,10 +21,26 @@ def cargo_home() -> Path:
     return Path.cwd() / "cargo"
 
 
-def clear_checksum(crate_dir: Path) -> None:
+def relax_file_checksums(crate_dir: Path) -> None:
+    """Allow patched sources without dropping the lockfile checksum.
+
+    Cargo compares `.cargo-checksum.json`'s `package` field to `Cargo.lock`.
+    Setting `package` to null makes `cargo --locked` fail ("checksum could not
+    be calculated"). An empty `files` map skips per-file checks so the patch
+    applies. See the cargo vendor checksum format.
+    """
     checksum = crate_dir / ".cargo-checksum.json"
-    checksum.write_text(json.dumps({"files": {}, "package": None}) + "\n", encoding="utf-8")
-    print(f"cleared checksum: {checksum}")
+    if not checksum.is_file():
+        sys.exit(f"missing checksum file: {checksum}")
+    data = json.loads(checksum.read_text(encoding="utf-8"))
+    package = data.get("package")
+    if not isinstance(package, str) or len(package) != 64:
+        sys.exit(f"vendor checksum has no package hash: {checksum}")
+    checksum.write_text(
+        json.dumps({"files": {}, "package": package}) + "\n",
+        encoding="utf-8",
+    )
+    print(f"kept package checksum, cleared file checksums: {checksum}")
 
 
 def replace_file(dest: Path, source: Path) -> None:
@@ -53,14 +69,14 @@ def main() -> None:
         / "mod.rs",
         PATCHES / "winit-0.30.13-text_input_mod.rs",
     )
-    clear_checksum(winit)
+    relax_file_checksums(winit)
 
     slint_winit = vendor / "i-slint-backend-winit-1.18.1"
     replace_file(
         slint_winit / "clipboard.rs",
         PATCHES / "i-slint-backend-winit-1.18.1-clipboard.rs",
     )
-    clear_checksum(slint_winit)
+    relax_file_checksums(slint_winit)
 
     print("vendor patches applied")
 

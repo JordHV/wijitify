@@ -10,9 +10,10 @@ On push/PR to `main`: fmt, clippy (`-D warnings`), test, release build, Flatpak 
 
 ## Tag release
 
-1. Update `CHANGELOG.md` and `Cargo.toml` version.
-2. Tag `vX.Y.Z` and push the tag.
-3. `release.yml` verifies tag == crate version, builds a signed OSTree repo onto the `gh-pages` branch (GitHub Pages), writes `latest.json` + `.flatpakref`, and publishes a GitHub Release with a `.flatpak` bundle that includes `--repo-url` so bundle installs can still update.
+1. Bump `Cargo.toml`, the top of `CHANGELOG.md`, and the first `<release>` in `packaging/flatpak/io.github.JordHV.Wijitify.metainfo.xml` to the same new version. Never reuse a tag, including one whose GitHub Release failed (`v0.3.1` did not publish).
+2. On Linux, from the repo root, run `python3 scripts/release-precheck.py vX.Y.Z`. It must exit 0. That script checks version agreement, the Flatpak vendor-patch checksums, `cargo-sources.json`, fmt, clippy, tests, and `cargo --offline build --release --locked` against a vendored tree with those patches applied — the command the Flatpak build runs. From Windows, start the `wijitify-vm` guest and run it there. Do not push until it exits 0: pushing `main` starts CI, and pushing the tag starts the release.
+3. Commit, push `main`, tag `vX.Y.Z`, and push the tag.
+4. `release.yml` verifies tag == crate version, builds a signed OSTree repo onto the `gh-pages` branch (GitHub Pages), writes `latest.json` + `.flatpakref`, and publishes a GitHub Release with a `.flatpak` bundle that includes `--repo-url` so bundle installs can still update.
 
 ## Install (preferred — updateable)
 

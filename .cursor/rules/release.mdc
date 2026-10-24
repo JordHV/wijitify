@@ -1,0 +1,16 @@
+---
+description: Required steps before pushing a Wijitify release or version tag
+alwaysApply: false
+---
+
+# Release
+
+When the user asks to push, tag, or release a version, follow [docs/RELEASES.md](docs/RELEASES.md).
+
+Before any `git push` of `main` or a `v*` tag:
+
+1. Bump `Cargo.toml`, the top `CHANGELOG.md` heading, and the first metainfo `<release>` together. Never reuse a tag, even if the GitHub Release failed.
+2. On Linux (`wijitify-vm` from Windows), run `python3 scripts/release-precheck.py vX.Y.Z`.
+3. Push only after that script exits 0. It runs fmt, clippy, tests, and the Flatpak `cargo --offline build --release --locked` line with vendor patches applied.
+
+Do not push a tag to see if Actions will compile it.
