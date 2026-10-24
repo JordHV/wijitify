@@ -43,6 +43,8 @@ Host wijitify-vm
 
 Confirm `uname -r` contains `surface` and `systemctl status iptsd` is active. Install Flatpak + Flathub. Measure performance only on this device.
 
+After installing a build that includes the touch-edit Flatpak patches, on the device (not the VM) check: GNOME OSK Backspace and hold-to-delete in a text field; long-press Cut/Copy/Paste/Select all; copy into Text Editor and paste back.
+
 ## Official docs
 
 - [Rust Book](https://doc.rust-lang.org/book/)

@@ -35,9 +35,9 @@ const HELP_TEXT: &str = "\
 Dashboard\n\
 The top bar shows the clock, period title with arrows, Today, the view pill, refresh, and Settings (gear). The left sidebar has two mini months and calendar toggles.\n\n\
 Views\n\
-Day and Week show an all-day row plus timed events with a red now-line on today. Month and Year use grids (title-only chips). Agenda is a chronological list. Settings → Preset views manages Day/Week/Month/Year/Agenda auto presets plus any you create. Toggle Show to put a preset in the dashboard pill. Default (one at a time) is what the dashboard Default button restores — today in that view — and the startup view. Each preset has a checkbox per weekday; unchecked days are left out of that view. Month presets can also set a week count and start on the week of the date you are viewing, so the month grid shows only those weeks.\n\n\
+Day and Week show an all-day row plus timed events with a red now-line on today. Month and Year use grids (title-only chips). Agenda is a chronological list. Settings → Preset views manages Day/Week/Month/Year/Agenda auto presets plus any you create. Toggle Show to put a preset in the dashboard pill. Default (one at a time) is what the dashboard Default button restores — today in that view — and the startup view. Each preset has a checkbox per weekday; unchecked days are left out of that view. Month presets set a week count. With Start on this week, 1 is that week and 2 adds the next. Without it, the grid starts on the week of the 1st and runs through the week you are viewing; week count 1 stops there, and 2 also shows the next week. Title lines is how many lines an event title uses before it ends with …; the event box grows to fit.\n\n\
 Navigation\n\
-Arrows move by one unit of the current grain (Agenda steps by its week count). Tapping the period title zooms out one level. The view pill switches among visible presets.\n\n\
+Arrows move by one unit of the current grain (Agenda steps by its week count). A month that starts on this week steps by its week count; otherwise arrows move one month. Tapping the period title zooms out one level. The view pill switches among visible presets.\n\n\
 Display\n\
 Settings → Global: font, font size, date/time format, week start, dim past days, and shade weekends. Settings → Calendar display toggles day-popup fields.\n\n\
 Calendars\n\
@@ -833,6 +833,7 @@ fn bind_settings_preset(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<App
         z.presets[idx].clamp_day_hours();
         z.presets[idx].clamp_show_days();
         z.presets[idx].clamp_month_weeks();
+        z.presets[idx].clamp_title_lines();
         let id = z.presets[idx].id.clone();
         let unit = z.presets[idx].unit;
         let count = z.presets[idx].count;
@@ -1216,6 +1217,25 @@ fn bind_settings_preset(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<App
     {
         let ui_weak = ui.as_weak();
         let ctx = ctx.clone();
+        ui.on_settings_set_preset_title_lines(move |lines| {
+            let t0 = Instant::now();
+            {
+                let mut c = ctx.borrow_mut();
+                let _ = with_selected_preset(&mut c, |p| {
+                    p.title_lines = lines as u32;
+                    p.clamp_title_lines();
+                });
+            }
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_settings(&ui, &ctx.borrow());
+                apply_zalender(&ui, &ctx.borrow());
+            }
+            log_cb("settings_set_preset_title_lines", t0);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
         ui.on_settings_set_week_start(move |v| {
             let t0 = Instant::now();
             {
@@ -1568,14 +1588,16 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
             if let Ok(d) = NaiveDate::parse_from_str(&key, "%Y-%m-%d") {
                 let mut c = ctx.borrow_mut();
                 c.selected_day = d;
-                c.anchor = d;
                 c.event_detail_open = false;
                 match c.view_unit {
                     ViewUnit::Day | ViewUnit::Week => {
+                        c.anchor = d;
                         let start = c.create_start_mins.max(0);
                         open_create_event_draft(&mut c, d, start);
                     }
                     ViewUnit::Month | ViewUnit::Year | ViewUnit::Agenda => {
+                        // Keep the grid on the month already on screen. Neighboring-month
+                        // days still open the modal; they must not retarget the view.
                         c.create_event_open = false;
                         c.day_modal_open = true;
                     }
@@ -2516,14 +2538,7 @@ fn apply_settings(ui: &AppWindow, c: &AppCtx) {
         .map(|(i, p)| SettingsPresetRow {
             id: SharedString::from(p.id.as_str()),
             name: SharedString::from(p.name.as_str()),
-            summary: SharedString::from(format!(
-                "{} · count {}{}{}{}",
-                p.unit.label(),
-                p.count,
-                shown_day_summary(&p.show_days),
-                month_layout_summary(p),
-                if p.builtin { " · auto" } else { "" }
-            )),
+            summary: SharedString::from(preset_row_summary(p)),
             visible: p.visible,
             builtin: p.builtin,
             selected: i == sel_idx,
@@ -2557,6 +2572,10 @@ fn apply_settings(ui: &AppWindow, c: &AppCtx) {
     ))));
     ui.set_preset_month_weeks(selected.map(|p| p.month_weeks as i32).unwrap_or(6));
     ui.set_preset_month_from_week(selected.map(|p| p.month_from_this_week).unwrap_or(false));
+    ui.set_preset_title_lines(selected.map(|p| p.title_lines as i32).unwrap_or(1));
+    ui.set_title_line_options(string_model(&[
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+    ]));
     ui.set_week_count_options(string_model(&["1", "2", "3", "4", "5", "6"]));
     ui.set_week_start(z.week_start.as_i32());
     ui.set_datetime_format(c.config.datetime_format.as_i32());
@@ -2762,21 +2781,18 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
     let week_start = z.week_start;
     let visible = visible_feed_ids(&z);
 
-    let active = z.presets.iter().find(|p| p.id == c.active_preset_id);
-    let title = match active {
-        Some(p) if c.view_unit == ViewUnit::Month && p.month_from_this_week => {
-            let weeks = p.month_weeks.clamp(1, 6) * c.view_count.max(1);
-            zal_view::title_for_week_window(c.anchor, weeks, week_start)
-        }
-        _ => zal_view::title_for_view(c.anchor, c.view_unit, c.view_count, week_start),
-    };
+    let title = zal_view::title_for_view(c.anchor, c.view_unit, c.view_count, week_start);
     ui.set_zal_title_period(SharedString::from(title));
     ui.set_zal_status(SharedString::from(c.status.as_str()));
     ui.set_zal_status_kind(c.status_kind);
     ui.set_zal_refreshing(c.refreshing);
     ui.set_zal_empty_feeds(z.feeds.is_empty());
     ui.set_zal_view_unit(c.view_unit.as_i32());
-    ui.set_zal_view_count(c.view_count as i32);
+    ui.set_zal_view_count(if c.view_unit == ViewUnit::Month {
+        1
+    } else {
+        c.view_count as i32
+    });
 
     let dash = dashboard_presets(&z);
     let options: Vec<SharedString> = dash
@@ -2846,11 +2862,18 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
     )));
     let show_days = hour_preset.show_days;
     let month_rows = if c.view_unit == ViewUnit::Month {
-        hour_preset.month_weeks.clamp(1, 6)
+        zal_view::month_week_span(
+            c.anchor,
+            hour_preset.month_weeks,
+            hour_preset.month_from_this_week,
+            week_start,
+        )
+        .1
     } else {
         6
     };
     ui.set_zal_month_rows(month_rows as i32);
+    ui.set_zal_title_lines(hour_preset.title_lines.clamp(1, 10) as i32);
     let grid_cols = zal_view::shown_week_columns(week_start, &show_days);
     ui.set_zal_grid_columns(grid_cols.len() as i32);
     ui.set_zal_grid_labels(ModelRc::new(VecModel::from(
@@ -2953,7 +2976,11 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
     ui.set_zal_detail_custom_summary(SharedString::from(detail.1));
 
     ui.set_zal_customize_open(c.customize_open);
-    ui.set_zal_customize_color(SharedString::from(c.customize_color.as_str()));
+    ui.set_zal_customize_color(color::parse_hex(if c.customize_color.is_empty() {
+        "#3b82f6"
+    } else {
+        c.customize_color.as_str()
+    }));
     ui.set_zal_customize_icon(SharedString::from(c.customize_icon.as_str()));
     ui.set_zal_customize_occurrence(c.customize_occurrence);
     ui.set_zal_customize_has_recurrence(
@@ -3137,38 +3164,15 @@ fn build_main_days(
             }
         }
         ViewUnit::Month => {
-            let weeks = preset.month_weeks.clamp(1, 6);
-            if preset.month_from_this_week {
-                let mut start =
-                    zal_model::start_of_week(c.anchor, zal_view::week_start_num(week_start));
-                for i in 0..c.view_count.max(1) {
-                    let focus = if i == 0 {
-                        c.anchor
-                    } else {
-                        start + chrono::Duration::days(3)
-                    };
-                    cells.extend(build_rolling_weeks(
-                        start, weeks, focus, today, week_start, c, z, visible, slots, show_days,
-                    ));
-                    start += chrono::Duration::days(7 * i64::from(weeks));
-                }
-            } else {
-                for i in 0..c.view_count {
-                    let d = zal_view::shift_anchor(c.anchor, ViewUnit::Month, i as i32);
-                    cells.extend(build_month_cells(
-                        d,
-                        today,
-                        week_start,
-                        c,
-                        z,
-                        visible,
-                        slots,
-                        true,
-                        show_days,
-                        weeks as usize,
-                    ));
-                }
-            }
+            let (start, weeks) = zal_view::month_week_span(
+                c.anchor,
+                preset.month_weeks,
+                preset.month_from_this_week,
+                week_start,
+            );
+            cells.extend(build_rolling_weeks(
+                start, weeks, c.anchor, today, week_start, c, z, visible, slots, show_days,
+            ));
         }
         ViewUnit::Year => {
             for y in 0..c.view_count {
@@ -3238,16 +3242,43 @@ fn build_rolling_weeks(
     cells
 }
 
+fn preset_row_summary(p: &ViewPreset) -> String {
+    let days = shown_day_summary(&p.show_days);
+    let lines = if p.title_lines > 1 {
+        format!(" · {} lines", p.title_lines)
+    } else {
+        String::new()
+    };
+    let auto = if p.builtin { " · auto" } else { "" };
+    if p.unit == ViewUnit::Month {
+        format!(
+            "{}{}{}{}{}",
+            p.unit.label(),
+            month_layout_summary(p),
+            days,
+            lines,
+            auto
+        )
+    } else {
+        format!(
+            "{} · count {}{}{}{}",
+            p.unit.label(),
+            p.count,
+            days,
+            lines,
+            auto
+        )
+    }
+}
+
 fn month_layout_summary(p: &ViewPreset) -> String {
     if p.unit != ViewUnit::Month {
         return String::new();
     }
     if p.month_from_this_week {
         format!(" · {}w from this week", p.month_weeks)
-    } else if p.month_weeks < 6 {
-        format!(" · {}w", p.month_weeks)
     } else {
-        String::new()
+        format!(" · {}w from month start", p.month_weeks)
     }
 }
 

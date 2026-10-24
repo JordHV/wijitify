@@ -1,6 +1,13 @@
 import { Theme } from "../theme.slint";
 import { Icons, FaIcon } from "../icons.slint";
 
+/// Shell-wide cut/copy/paste/select-all for the focused TextInput.
+/// `action`: 1 cut, 2 copy, 3 paste, 4 select-all. Bump `token` to deliver.
+export global TextEditActions {
+    in-out property <int> token: 0;
+    in-out property <int> action: 0;
+}
+
 // role: "primary" | "secondary" | "danger"
 // Content-sized pill — hug the label; do not stretch to fill the parent.
 export component Button inherits TouchArea {
@@ -18,14 +25,16 @@ export component Button inherits TouchArea {
     enabled: active;
 
     HorizontalLayout {
-        padding-left: square ? 0 : 4px;
-        padding-right: square ? 0 : 4px;
-        padding-top: square ? 0 : 6px;
-        padding-bottom: square ? 0 : 6px;
-        alignment: center;
+        padding-left: square ? 0px : 4px;
+        padding-right: square ? 0px : 4px;
+        padding-top: square ? 0px : 6px;
+        padding-bottom: square ? 0px : 6px;
 
         Rectangle {
-            min-width: square ? Theme.touch-min : 0px;
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            min-width: root.square ? Theme.touch-min : (label.preferred-width + 32px);
+            min-height: root.square ? Theme.touch-min : 36px;
             background: root.pressed && root.active
                 ? (root.role == "primary" ? Theme.accent-press
                     : root.role == "danger" ? Theme.danger-press
@@ -37,20 +46,13 @@ export component Button inherits TouchArea {
             border-width: root.role == "secondary" ? 1px : 0;
             border-color: Theme.surface-press;
 
-            HorizontalLayout {
-                padding-left: square ? 0 : 16px;
-                padding-right: square ? 0 : 16px;
-                min-height: square ? Theme.touch-min : 36px;
-                min-width: square ? Theme.touch-min : 0px;
-                alignment: center;
-                Text {
-                    text: root.label;
-                    color: root.role == "secondary" ? Theme.text : Theme.text-on-accent;
-                    font-size: Theme.font-body;
-                    font-weight: 600;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
-                }
+            label := Text {
+                text: root.label;
+                color: root.role == "secondary" ? Theme.text : Theme.text-on-accent;
+                font-size: Theme.font-body;
+                font-weight: 600;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
             }
         }
     }
@@ -101,7 +103,21 @@ export component PillButton inherits TouchArea {
     callback activate;
 
     min-height: Theme.touch-min;
-    min-width: 96px;
+    horizontal-stretch: 0;
+    label-size := Text {
+        text: root.label;
+        font-size: Theme.font-body;
+        font-weight: 600;
+        opacity: 0;
+        width: 0px;
+        height: 0px;
+        accessible-role: none;
+    }
+    // Wide enough for the label inside the pill inset and side padding.
+    property <length> pill-width: max(96px, label-size.preferred-width + 44px);
+    min-width: root.pill-width;
+    max-width: root.pill-width;
+    preferred-width: root.pill-width;
 
     // Visual pill inset from the touch target / header chrome.
     Rectangle {
@@ -109,23 +125,21 @@ export component PillButton inherits TouchArea {
         y: 6px;
         width: parent.width - 8px;
         height: parent.height - 12px;
-        border-radius: (parent.height - 12px) / 2;
+        border-radius: self.height / 2;
         background: root.pressed ? Theme.surface-press : Theme.surface-2;
         border-width: 1px;
         border-color: Theme.surface-press;
-        HorizontalLayout {
-            padding-left: 14px;
-            padding-right: 14px;
-            alignment: center;
-            Text {
-                text: root.label;
-                color: Theme.text;
-                font-size: Theme.font-body;
-                font-weight: 600;
-                vertical-alignment: center;
-                horizontal-alignment: center;
-                horizontal-stretch: 1;
-            }
+        Text {
+            x: 14px;
+            y: 0;
+            width: parent.width - 28px;
+            height: 100%;
+            text: root.label;
+            color: Theme.text;
+            font-size: Theme.font-body;
+            font-weight: 600;
+            vertical-alignment: center;
+            horizontal-alignment: center;
         }
     }
 
@@ -271,6 +285,16 @@ export component Field inherits VerticalLayout {
     callback edited();
     spacing: 4px;
 
+    property <int> edit-token: TextEditActions.token;
+    changed edit-token => {
+        if field-input.has-focus {
+            if TextEditActions.action == 1 { field-input.cut(); }
+            if TextEditActions.action == 2 { field-input.copy(); }
+            if TextEditActions.action == 3 { field-input.paste(); }
+            if TextEditActions.action == 4 { field-input.select-all(); }
+        }
+    }
+
     HorizontalLayout {
         spacing: 4px;
         alignment: stretch;
@@ -311,6 +335,16 @@ export component LongField inherits VerticalLayout {
     in property <string> caption;
     in-out property <string> text;
     spacing: 4px;
+
+    property <int> edit-token: TextEditActions.token;
+    changed edit-token => {
+        if field-input.has-focus {
+            if TextEditActions.action == 1 { field-input.cut(); }
+            if TextEditActions.action == 2 { field-input.copy(); }
+            if TextEditActions.action == 3 { field-input.paste(); }
+            if TextEditActions.action == 4 { field-input.select-all(); }
+        }
+    }
 
     Text {
         text: root.caption;
@@ -466,6 +500,7 @@ export component SettingsDivider inherits HorizontalLayout {
 }
 
 /// Right-aligned text box. Wider than a switch or a two-digit count.
+/// The touch row stays full height; the box is inset like a settings dropdown.
 export component ShortInput inherits Rectangle {
     in-out property <string> text: "";
     in property <length> box-width: 220px;
@@ -478,23 +513,44 @@ export component ShortInput inherits Rectangle {
     preferred-width: root.box-width;
     min-height: Theme.touch-min;
     vertical-stretch: 0;
-    background: Theme.surface;
-    border-radius: Theme.radius;
-    border-width: input.has-focus ? 2px : 1px;
-    border-color: input.has-focus ? Theme.accent : Theme.surface-2;
+    background: transparent;
 
-    HorizontalLayout {
-        padding-left: Theme.pad-sm;
-        padding-right: Theme.pad-sm;
-        input := TextInput {
-            text <=> root.text;
-            color: Theme.text;
-            font-size: Theme.font-body;
-            font-weight: root.font-weight;
-            single-line: true;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-            edited => { root.edited(); }
+    property <int> edit-token: TextEditActions.token;
+    changed edit-token => {
+        if input.has-focus {
+            if TextEditActions.action == 1 { input.cut(); }
+            if TextEditActions.action == 2 { input.copy(); }
+            if TextEditActions.action == 3 { input.paste(); }
+            if TextEditActions.action == 4 { input.select-all(); }
+        }
+    }
+
+    Rectangle {
+        x: 2px;
+        y: 8px;
+        width: parent.width - 4px;
+        height: parent.height - 16px;
+        background: Theme.surface;
+        border-radius: Theme.radius;
+        border-width: input.has-focus ? 2px : 1px;
+        border-color: input.has-focus ? Theme.accent : Theme.surface-2;
+
+        HorizontalLayout {
+            height: 100%;
+            padding-left: Theme.pad-sm;
+            padding-right: Theme.pad-sm;
+            alignment: center;
+            cross-axis-alignment: center;
+            input := TextInput {
+                text <=> root.text;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                font-weight: root.font-weight;
+                single-line: true;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                edited => { root.edited(); }
+            }
         }
     }
 }
@@ -604,15 +660,21 @@ export component Dropdown inherits VerticalLayout {
                 if menu.is-open { menu.close(); } else { menu.show(); }
             }
             Rectangle {
+                x: 2px;
+                y: 8px;
+                width: parent.width - 4px;
+                height: parent.height - 16px;
                 background: ta.pressed ? Theme.surface-press : Theme.surface;
                 border-radius: Theme.radius;
                 border-width: 1px;
                 border-color: Theme.surface-2;
                 HorizontalLayout {
+                    height: 100%;
                     padding-left: Theme.pad-sm;
                     padding-right: Theme.pad-sm;
                     spacing: 4px;
                     alignment: center;
+                    cross-axis-alignment: center;
                     Text {
                         text: root.current;
                         color: Theme.text;
@@ -660,9 +722,10 @@ export component Dropdown inherits VerticalLayout {
                             for opt[i] in options: TouchArea {
                                 min-height: Theme.touch-min;
                                 clicked => {
-                                    root.selected = i;
-                                    menu.close();
+                                    // Read the index before close. Closing the popup first
+                                    // drops the repeater index and the choice comes back as 6.
                                     root.changed(i);
+                                    menu.close();
                                 }
                                 Rectangle {
                                     background: parent.pressed ? Theme.surface-press
@@ -725,27 +788,44 @@ export component Tip inherits Rectangle {
     }
 }
 
-struct ColorSwatch {
-    hex: string,
-    brush: color,
-}
-
-/// Color box. Click opens a swatch grid over the page; the box shows the chosen color.
+/// Color box. Click opens a hue/saturation/value field (Paint-style). Drag to pick; release commits.
 export component ColorBox inherits TouchArea {
     in property <color> value: #3b82f6;
     callback picked(string);
 
-    property <color> shown: root.value;
-    changed value => { root.shown = root.value; }
+    property <bool> dragging: false;
+    property <float> drag-h: 0;
+    property <float> drag-s: 1;
+    property <float> drag-v: 1;
+    property <float> hue: root.dragging ? root.drag-h : root.value.to-hsv().hue;
+    property <float> sat: root.dragging ? root.drag-s : root.value.to-hsv().saturation;
+    property <float> val: root.dragging ? root.drag-v : root.value.to-hsv().value;
+    property <color> shown: hsv(root.hue, root.sat, root.val);
 
-    property <[ColorSwatch]> palette: [
-        { hex: "#7f1d1d", brush: #7f1d1d }, { hex: "#7c2d12", brush: #7c2d12 }, { hex: "#713f12", brush: #713f12 }, { hex: "#14532d", brush: #14532d }, { hex: "#134e4a", brush: #134e4a }, { hex: "#1e3a8a", brush: #1e3a8a }, { hex: "#581c87", brush: #581c87 }, { hex: "#831843", brush: #831843 },
-        { hex: "#b91c1c", brush: #b91c1c }, { hex: "#c2410c", brush: #c2410c }, { hex: "#a16207", brush: #a16207 }, { hex: "#15803d", brush: #15803d }, { hex: "#0f766e", brush: #0f766e }, { hex: "#1d4ed8", brush: #1d4ed8 }, { hex: "#7e22ce", brush: #7e22ce }, { hex: "#be185d", brush: #be185d },
-        { hex: "#ef4444", brush: #ef4444 }, { hex: "#f97316", brush: #f97316 }, { hex: "#eab308", brush: #eab308 }, { hex: "#22c55e", brush: #22c55e }, { hex: "#14b8a6", brush: #14b8a6 }, { hex: "#3b82f6", brush: #3b82f6 }, { hex: "#a855f7", brush: #a855f7 }, { hex: "#ec4899", brush: #ec4899 },
-        { hex: "#f87171", brush: #f87171 }, { hex: "#fb923c", brush: #fb923c }, { hex: "#facc15", brush: #facc15 }, { hex: "#4ade80", brush: #4ade80 }, { hex: "#2dd4bf", brush: #2dd4bf }, { hex: "#60a5fa", brush: #60a5fa }, { hex: "#c084fc", brush: #c084fc }, { hex: "#f472b6", brush: #f472b6 },
-        { hex: "#fecaca", brush: #fecaca }, { hex: "#fed7aa", brush: #fed7aa }, { hex: "#fef08a", brush: #fef08a }, { hex: "#bbf7d0", brush: #bbf7d0 }, { hex: "#99f6e4", brush: #99f6e4 }, { hex: "#bfdbfe", brush: #bfdbfe }, { hex: "#e9d5ff", brush: #e9d5ff }, { hex: "#fbcfe8", brush: #fbcfe8 },
-        { hex: "#000000", brush: #000000 }, { hex: "#1a2332", brush: #1a2332 }, { hex: "#334155", brush: #334155 }, { hex: "#64748b", brush: #64748b }, { hex: "#94a3b8", brush: #94a3b8 }, { hex: "#cbd5e1", brush: #cbd5e1 }, { hex: "#e7ecf3", brush: #e7ecf3 }, { hex: "#ffffff", brush: #ffffff },
-    ];
+    function hex-digit(n: int) -> string {
+        n <= 0 ? "0" : n == 1 ? "1" : n == 2 ? "2" : n == 3 ? "3" : n == 4 ? "4"
+            : n == 5 ? "5" : n == 6 ? "6" : n == 7 ? "7" : n == 8 ? "8" : n == 9 ? "9"
+            : n == 10 ? "a" : n == 11 ? "b" : n == 12 ? "c" : n == 13 ? "d"
+            : n == 14 ? "e" : "f";
+    }
+    function hex-byte(n: int) -> string {
+        root.hex-digit(floor(n / 16)) + root.hex-digit(mod(n, 16));
+    }
+    function hex-of(c: color) -> string {
+        "#" + root.hex-byte(c.red) + root.hex-byte(c.green) + root.hex-byte(c.blue);
+    }
+    function begin-drag() {
+        if !root.dragging {
+            root.drag-h = root.value.to-hsv().hue;
+            root.drag-s = root.value.to-hsv().saturation;
+            root.drag-v = root.value.to-hsv().value;
+            root.dragging = true;
+        }
+    }
+    function commit() {
+        root.picked(root.hex-of(root.shown));
+        root.dragging = false;
+    }
 
     min-width: Theme.touch-min;
     min-height: Theme.touch-min;
@@ -775,26 +855,98 @@ export component ColorBox inherits TouchArea {
             border-width: 1px;
             border-color: Theme.surface-2;
 
-            VerticalLayout {
-                padding: 8px;
-                spacing: 6px;
-                for row in 6: HorizontalLayout {
-                    spacing: 6px;
-                    for col in 8: swatch := TouchArea {
-                        property <ColorSwatch> chip: root.palette[row * 8 + col];
-                        width: 36px;
-                        height: 36px;
-                        clicked => {
-                            root.shown = swatch.chip.brush;
-                            root.picked(swatch.chip.hex);
-                            menu.close();
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 12px;
+
+                // Saturation across, value down. White→hue, then a black fade.
+                sv := TouchArea {
+                    width: 220px;
+                    height: 180px;
+                    changed mouse-x => {
+                        if self.pressed {
+                            root.begin-drag();
+                            root.drag-s = clamp(self.mouse-x / self.width, 0, 1);
+                            root.drag-v = clamp(1 - self.mouse-y / self.height, 0, 1);
                         }
+                    }
+                    changed mouse-y => {
+                        if self.pressed {
+                            root.begin-drag();
+                            root.drag-s = clamp(self.mouse-x / self.width, 0, 1);
+                            root.drag-v = clamp(1 - self.mouse-y / self.height, 0, 1);
+                        }
+                    }
+                    changed pressed => {
+                        if self.pressed {
+                            root.begin-drag();
+                            root.drag-s = clamp(self.mouse-x / self.width, 0, 1);
+                            root.drag-v = clamp(1 - self.mouse-y / self.height, 0, 1);
+                        } else if root.dragging {
+                            root.commit();
+                        }
+                    }
+
+                    Rectangle {
+                        width: 100%;
+                        height: 100%;
+                        border-width: 1px;
+                        border-color: Theme.surface-press;
+                        background: @linear-gradient(90deg, #ffffff 0%, hsv(root.hue, 1, 1) 100%);
                         Rectangle {
-                            border-radius: 6px;
-                            background: swatch.chip.brush;
-                            border-width: root.shown == swatch.chip.brush ? 3px : 1px;
-                            border-color: root.shown == swatch.chip.brush ? Theme.text : Theme.surface-press;
+                            width: 100%;
+                            height: 100%;
+                            background: @linear-gradient(180deg, #00000000 0%, #000000 100%);
                         }
+                    }
+                    Rectangle {
+                        width: 14px;
+                        height: 14px;
+                        border-radius: 7px;
+                        border-width: 2px;
+                        border-color: root.val > 0.6 ? #000000 : #ffffff;
+                        background: transparent;
+                        x: root.sat * (parent.width - self.width);
+                        y: (1 - root.val) * (parent.height - self.height);
+                    }
+                }
+
+                hue-bar := TouchArea {
+                    width: 36px;
+                    height: 180px;
+                    changed mouse-y => {
+                        if self.pressed {
+                            root.begin-drag();
+                            root.drag-h = clamp(self.mouse-y / self.height, 0, 1) * 360;
+                        }
+                    }
+                    changed pressed => {
+                        if self.pressed {
+                            root.begin-drag();
+                            root.drag-h = clamp(self.mouse-y / self.height, 0, 1) * 360;
+                        } else if root.dragging {
+                            root.commit();
+                        }
+                    }
+
+                    Rectangle {
+                        width: 100%;
+                        height: 100%;
+                        border-width: 1px;
+                        border-color: Theme.surface-press;
+                        background: @linear-gradient(180deg,
+                            hsv(0, 1, 1) 0%, hsv(60, 1, 1) 16%, hsv(120, 1, 1) 33%,
+                            hsv(180, 1, 1) 50%, hsv(240, 1, 1) 66%, hsv(300, 1, 1) 83%,
+                            hsv(360, 1, 1) 100%);
+                    }
+                    Rectangle {
+                        x: 0;
+                        y: (root.hue / 360) * (parent.height - self.height);
+                        width: 100%;
+                        height: 6px;
+                        border-width: 2px;
+                        border-color: #ffffff;
+                        background: #000000;
                     }
                 }
             }

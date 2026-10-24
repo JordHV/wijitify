@@ -1,6 +1,6 @@
 import { Theme } from "./theme.slint";
 import { Icons } from "./icons.slint";
-import { IconButton } from "./shell/kit.slint";
+import { IconButton, TextEditActions } from "./shell/kit.slint";
 import {
     SettingsOverlay, ModuleToggleRow, SettingsFeedRow, SettingsFieldDefRow, ThemeColorRow,
     SettingsPresetRow, WeekdayCheck
@@ -74,6 +74,8 @@ export component AppWindow inherits Window {
     in property <[WeekdayCheck]> preset-weekdays;
     in property <int> preset-month-weeks: 6;
     in property <bool> preset-month-from-week: false;
+    in property <int> preset-title-lines: 1;
+    in property <[string]> title-line-options;
     in property <[string]> week-count-options;
     in property <[string]> unit-options;
     in property <[string]> count-options;
@@ -107,6 +109,13 @@ export component AppWindow inherits Window {
     in property <string> update-error: "";
     in property <string> update-checked: "";
 
+    /// Touch/right-click text edit menu (cut/copy/paste/select-all).
+    in-out property <bool> text-edit-menu-open: false;
+    /// Logical pixels (set from Rust).
+    in-out property <float> text-edit-menu-x: 0;
+    in-out property <float> text-edit-menu-y: 0;
+    out property <bool> text-edit-focused: TextInputInterface.text-input-focused;
+
     // zalender
     in property <string> zal-title-period: "";
     in property <string> zal-status: "";
@@ -122,6 +131,7 @@ export component AppWindow inherits Window {
     in property <[string]> zal-grid-labels;
     in property <int> zal-grid-columns: 7;
     in property <int> zal-month-rows: 6;
+    in property <int> zal-title-lines: 1;
     in property <string> zal-side-title: "";
     in property <[DayCell]> zal-side-days;
     in property <[DayCell]> zal-main-days;
@@ -153,7 +163,7 @@ export component AppWindow inherits Window {
     in property <EventRow> zal-detail-event;
     in property <string> zal-detail-custom-summary: "";
     in property <bool> zal-customize-open: false;
-    in property <string> zal-customize-color: "";
+    in property <color> zal-customize-color: #3b82f6;
     in property <string> zal-customize-icon: "";
     in property <bool> zal-customize-occurrence: false;
     in property <bool> zal-customize-has-recurrence: false;
@@ -194,6 +204,7 @@ export component AppWindow inherits Window {
     callback settings-set-preset-weekday(int, bool);
     callback settings-set-preset-month-weeks(int);
     callback settings-set-preset-month-from-week(bool);
+    callback settings-set-preset-title-lines(int);
     callback settings-set-week-start(int);
     callback settings-set-datetime-format(int);
     callback settings-set-font-family(int);
@@ -292,6 +303,7 @@ export component AppWindow inherits Window {
                 grid-labels: root.zal-grid-labels;
                 grid-columns: root.zal-grid-columns;
                 month-rows: root.zal-month-rows;
+                title-lines: root.zal-title-lines;
                 side-title: root.zal-side-title;
                 side-days: root.zal-side-days;
                 main-days: root.zal-main-days;
@@ -409,6 +421,8 @@ export component AppWindow inherits Window {
                 preset-weekdays: root.preset-weekdays;
                 preset-month-weeks: root.preset-month-weeks;
                 preset-month-from-week: root.preset-month-from-week;
+                preset-title-lines: root.preset-title-lines;
+                title-line-options: root.title-line-options;
                 week-count-options: root.week-count-options;
                 unit-options: root.unit-options;
                 count-options: root.count-options;
@@ -468,6 +482,7 @@ export component AppWindow inherits Window {
                 set-preset-weekday(i, on) => { root.settings-set-preset-weekday(i, on); }
                 set-preset-month-weeks(n) => { root.settings-set-preset-month-weeks(n); }
                 set-preset-month-from-week(on) => { root.settings-set-preset-month-from-week(on); }
+                set-preset-title-lines(n) => { root.settings-set-preset-title-lines(n); }
                 set-week-start(i) => { root.settings-set-week-start(i); }
                 set-datetime-format(i) => { root.settings-set-datetime-format(i); }
                 set-font-family(i) => { root.settings-set-font-family(i); }
@@ -486,6 +501,55 @@ export component AppWindow inherits Window {
                 check-updates => { root.check-updates(); }
                 start-update => { root.start-update(); }
                 restart-app => { root.restart-app(); }
+            }
+        }
+    }
+
+    if text-edit-menu-open: TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 300;
+        clicked => { root.text-edit-menu-open = false; }
+        TouchArea {
+            x: min(root.text-edit-menu-x * 1px, root.width - 200px);
+            y: min(root.text-edit-menu-y * 1px, root.height - 220px);
+            width: 188px;
+            height: 208px;
+            clicked => { }
+            Rectangle {
+                background: Theme.surface;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: Theme.surface-2;
+                VerticalLayout {
+                    padding: 6px;
+                    spacing: 2px;
+                    for label[i] in ["Cut", "Copy", "Paste", "Select all"]: TouchArea {
+                        min-height: Theme.touch-min;
+                        clicked => {
+                            TextEditActions.action = i + 1;
+                            TextEditActions.token = TextEditActions.token + 1;
+                            root.text-edit-menu-open = false;
+                        }
+                        Rectangle {
+                            background: parent.pressed ? Theme.surface-press : transparent;
+                            border-radius: 14px;
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                Text {
+                                    text: label;
+                                    color: Theme.text;
+                                    font-size: Theme.font-body;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    height: 100%;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

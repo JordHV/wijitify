@@ -508,9 +508,13 @@ fn default_show_days() -> [bool; 7] {
     [true; 7]
 }
 
-/// Full month grid. Smaller values keep the first N week rows, or N weeks from this week.
+/// Week-count default. See `ViewPreset::month_weeks`.
 fn default_month_weeks() -> u32 {
     6
+}
+
+fn default_title_lines() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -535,12 +539,17 @@ pub struct ViewPreset {
     /// Weekdays included in this preset. Index 0 = Sunday … 6 = Saturday.
     #[serde(default = "default_show_days")]
     pub show_days: [bool; 7],
-    /// Week rows in a month grid (1–6). 6 is a full month.
+    /// With `month_from_this_week`, this many rows start on the viewed week.
+    /// Otherwise the grid runs from the week of the 1st through the viewed week,
+    /// plus this many weeks minus one after that week.
     #[serde(default = "default_month_weeks")]
     pub month_weeks: u32,
     /// Month grid starts on the week of the viewed date instead of the 1st.
     #[serde(default)]
     pub month_from_this_week: bool,
+    /// How many lines an event title may use (1–10) before the last line ends with ….
+    #[serde(default = "default_title_lines")]
+    pub title_lines: u32,
     #[serde(default = "default_true")]
     pub visible: bool,
     #[serde(default)]
@@ -568,6 +577,7 @@ impl ViewPreset {
             show_days: default_show_days(),
             month_weeks: default_month_weeks(),
             month_from_this_week: false,
+            title_lines: default_title_lines(),
             visible: true,
             builtin: true,
         }
@@ -584,6 +594,11 @@ impl ViewPreset {
     }
 
     pub fn clamp_count(&mut self) {
+        // Month span is `month_weeks`, not a stack of month grids.
+        if self.unit == ViewUnit::Month {
+            self.count = 1;
+            return;
+        }
         let max = self.unit.max_count();
         if self.count < 1 {
             self.count = 1;
@@ -607,6 +622,10 @@ impl ViewPreset {
 
     pub fn clamp_month_weeks(&mut self) {
         self.month_weeks = self.month_weeks.clamp(1, 6);
+    }
+
+    pub fn clamp_title_lines(&mut self) {
+        self.title_lines = self.title_lines.clamp(1, 10);
     }
 
     /// At least one weekday stays visible.
@@ -1038,6 +1057,7 @@ impl ZalenderConfig {
             p.clamp_day_hours();
             p.clamp_show_days();
             p.clamp_month_weeks();
+            p.clamp_title_lines();
             if p.name.trim().is_empty() {
                 p.name = p.unit.label().into();
             }
@@ -1439,6 +1459,14 @@ mod tests {
         let sunday = NaiveDate::from_ymd_opt(2026, 10, 18).unwrap();
         let monday = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
         assert_eq!(p.month_weeks, 6);
+        assert_eq!(p.title_lines, 1);
+        let mut lines = p.clone();
+        lines.title_lines = 0;
+        lines.clamp_title_lines();
+        assert_eq!(lines.title_lines, 1);
+        lines.title_lines = 12;
+        lines.clamp_title_lines();
+        assert_eq!(lines.title_lines, 10);
         assert!(!p.month_from_this_week);
         let mut weekdays = p;
         weekdays.show_days[0] = false;

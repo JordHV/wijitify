@@ -35,43 +35,12 @@ pub fn shift_anchor(anchor: NaiveDate, unit: ViewUnit, delta: i32) -> NaiveDate 
 
 pub fn title_for_view(
     anchor: NaiveDate,
-    unit: ViewUnit,
-    count: u32,
-    week_start: WeekStart,
+    _unit: ViewUnit,
+    _count: u32,
+    _week_start: WeekStart,
 ) -> String {
-    let _ws = week_start_num(week_start);
-    match unit {
-        ViewUnit::Day if count <= 1 => anchor.format("%d %b").to_string(),
-        ViewUnit::Day => {
-            let end = anchor + Duration::days(i64::from(count.saturating_sub(1)));
-            format!("{} – {}", anchor.format("%d %b"), end.format("%d %b %Y"))
-        }
-        ViewUnit::Week if count <= 1 => {
-            let start = start_of_week(anchor, _ws);
-            let end = start + Duration::days(6);
-            format!("{} – {}", start.format("%d %b"), end.format("%d %b %Y"))
-        }
-        ViewUnit::Week => {
-            let start = start_of_week(anchor, _ws);
-            let end = start + Duration::days(7 * i64::from(count) - 1);
-            format!("{} – {}", start.format("%d %b"), end.format("%d %b %Y"))
-        }
-        ViewUnit::Month if count <= 1 => anchor.format("%B %Y").to_string(),
-        ViewUnit::Month => {
-            let end = shift_anchor(anchor, ViewUnit::Month, count as i32 - 1);
-            format!("{} – {}", anchor.format("%b %Y"), end.format("%b %Y"))
-        }
-        ViewUnit::Year if count <= 1 => anchor.format("%Y").to_string(),
-        ViewUnit::Year => {
-            let end_y = anchor.year() + count as i32 - 1;
-            format!("{} – {}", anchor.year(), end_y)
-        }
-        ViewUnit::Agenda => {
-            let weeks = count.max(1);
-            let end = anchor + Duration::days(7 * i64::from(weeks) - 1);
-            format!("{} – {}", anchor.format("%d %b"), end.format("%d %b %Y"))
-        }
-    }
+    // Every view uses the same header: full month name and year of the date in view.
+    anchor.format("%B %Y").to_string()
 }
 
 pub fn month_grid(
@@ -83,17 +52,33 @@ pub fn month_grid(
     model::month_grid(year, month, today, week_start_num(week_start))
 }
 
-/// First and last date of `weeks` week-rows starting at the week that contains `anchor`.
-pub fn week_window(anchor: NaiveDate, weeks: u32, week_start: WeekStart) -> (NaiveDate, NaiveDate) {
-    let start = start_of_week(anchor, week_start_num(week_start));
-    let weeks = weeks.max(1);
-    let end = start + Duration::days(7 * i64::from(weeks) - 1);
-    (start, end)
-}
-
-pub fn title_for_week_window(anchor: NaiveDate, weeks: u32, week_start: WeekStart) -> String {
-    let (start, end) = week_window(anchor, weeks, week_start);
-    format!("{} – {}", start.format("%d %b"), end.format("%d %b %Y"))
+/// Week rows for a month preset.
+///
+/// `from_this_week`: `week_count` rows starting on the viewed week (1 = that week only).
+/// Otherwise: from the week of the 1st through the viewed week, plus `week_count - 1`
+/// weeks after it. Count 1 ends on the viewed week; count 2 includes the next week.
+pub fn month_week_span(
+    anchor: NaiveDate,
+    week_count: u32,
+    from_this_week: bool,
+    week_start: WeekStart,
+) -> (NaiveDate, u32) {
+    let ws = week_start_num(week_start);
+    let week_count = week_count.clamp(1, 6);
+    if from_this_week {
+        return (start_of_week(anchor, ws), week_count);
+    }
+    let first = NaiveDate::from_ymd_opt(anchor.year(), anchor.month(), 1).unwrap_or(anchor);
+    let start = start_of_week(first, ws);
+    let anchor_week = start_of_week(anchor, ws);
+    let through = anchor_week + Duration::days(7 * i64::from(week_count - 1));
+    let days = (through - start).num_days();
+    let rows = if days < 0 {
+        week_count
+    } else {
+        (days / 7) as u32 + 1
+    };
+    (start, rows.max(1))
 }
 
 pub fn week_labels(week_start: WeekStart) -> [&'static str; 7] {
@@ -135,6 +120,14 @@ mod tests {
         assert_eq!(ViewUnit::Day.zoom_out(), ViewUnit::Week);
         let title = title_for_view(d, ViewUnit::Month, 1, WeekStart::Sunday);
         assert_eq!(title, "October 2026");
+        assert_eq!(
+            title_for_view(d, ViewUnit::Week, 2, WeekStart::Sunday),
+            "October 2026"
+        );
+        assert_eq!(
+            title_for_view(d, ViewUnit::Day, 1, WeekStart::Sunday),
+            "October 2026"
+        );
     }
 
     #[test]
@@ -149,11 +142,31 @@ mod tests {
     }
 
     #[test]
-    fn week_window_starts_on_this_week() {
-        // 22 Oct 2026 is Thursday. Sunday-first week is 18–31 Oct for two weeks.
+    fn month_span_from_this_week_is_the_week_count() {
         let anchor = NaiveDate::from_ymd_opt(2026, 10, 22).unwrap();
-        let (start, end) = week_window(anchor, 2, WeekStart::Sunday);
+        let (start, rows) = month_week_span(anchor, 1, true, WeekStart::Sunday);
         assert_eq!(start, NaiveDate::from_ymd_opt(2026, 10, 18).unwrap());
-        assert_eq!(end, NaiveDate::from_ymd_opt(2026, 10, 31).unwrap());
+        assert_eq!(rows, 1);
+        let (start, rows) = month_week_span(anchor, 2, true, WeekStart::Sunday);
+        assert_eq!(start, NaiveDate::from_ymd_opt(2026, 10, 18).unwrap());
+        assert_eq!(rows, 2);
+        assert_eq!(
+            start + Duration::days(13),
+            NaiveDate::from_ymd_opt(2026, 10, 31).unwrap()
+        );
+    }
+
+    #[test]
+    fn month_span_from_month_start_runs_through_viewed_week() {
+        // 1 Oct 2026 is Thursday; Sunday-first week of the 1st starts 27 Sep.
+        // 22 Oct is in the week of 18 Oct. Count 1 ends that week (4 rows).
+        // Count 2 adds the week of 25 Oct (5 rows).
+        let anchor = NaiveDate::from_ymd_opt(2026, 10, 22).unwrap();
+        let (start, rows) = month_week_span(anchor, 1, false, WeekStart::Sunday);
+        assert_eq!(start, NaiveDate::from_ymd_opt(2026, 9, 27).unwrap());
+        assert_eq!(rows, 4);
+        let (start, rows) = month_week_span(anchor, 2, false, WeekStart::Sunday);
+        assert_eq!(start, NaiveDate::from_ymd_opt(2026, 9, 27).unwrap());
+        assert_eq!(rows, 5);
     }
 }

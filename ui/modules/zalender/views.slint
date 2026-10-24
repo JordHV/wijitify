@@ -1,7 +1,7 @@
 import { Theme } from "../../theme.slint";
 import { Icons, FaIcon, EventIcon } from "../../icons.slint";
 import {
-    Button, IconButton, PillButton, ViewPill, Field, Switch
+    Button, IconButton, PillButton, ViewPill, Field, Switch, ColorBox, TextEditActions
 } from "../../shell/kit.slint";
 
 /// Timed: surface fill + color bar. All-day: solid event color.
@@ -13,26 +13,26 @@ component EventChip inherits Rectangle {
     in property <bool> all-day: false;
     in property <bool> show-time: false;
     in property <bool> compact: false;
-    /// Day/week all-day row: two-line wrap, then ellipsis.
-    in property <bool> two-line: false;
+    /// Title wraps up to this many lines, then the last line ends with ….
+    in property <int> title-lines: 1;
+
+    property <int> lines: clamp(root.title-lines, 1, 10);
+    property <bool> multi: root.lines > 1;
 
     background: root.all-day ? root.event-color : Theme.surface-2;
     border-radius: root.compact ? 3px : 4px;
-    // 4px matches the two-line vertical padding below.
-    min-height: root.two-line ? line-sample.preferred-height + 4px
-        : root.compact ? 16px
-        : (root.show-time ? 36px : 22px);
 
-    // Same face as the two-line title, so the chip is exactly two lines tall.
-    line-sample := Text {
+    line-probe := Text {
         width: 0px;
         height: 0px;
         opacity: 0;
         accessible-role: none;
-        text: "Ag\nAg";
-        font-size: 11px;
+        text: "Ag";
+        font-size: root.compact ? 11px : Theme.font-event;
         font-weight: 600;
     }
+    property <length> title-block: line-probe.preferred-height * root.lines;
+    min-height: root.title-block + (root.show-time && root.time-text != "" ? 16px : 0px) + 4px;
 
     HorizontalLayout {
         width: 100%;
@@ -45,25 +45,24 @@ component EventChip inherits Rectangle {
             vertical-stretch: 1;
         }
         VerticalLayout {
-            padding-left: root.compact || root.two-line ? 4px : 6px;
-            padding-right: root.compact || root.two-line ? 4px : 6px;
-            padding-top: root.two-line ? 2px : (root.compact ? 1px : 3px);
-            padding-bottom: root.two-line ? 2px : (root.compact ? 1px : 3px);
+            padding-left: root.compact ? 4px : 6px;
+            padding-right: root.compact ? 4px : 6px;
+            padding-top: 2px;
+            padding-bottom: 2px;
             spacing: 0px;
-            alignment: root.two-line ? start : center;
+            alignment: start;
             Text {
                 text: root.title;
                 color: root.all-day ? Theme.text-on-accent : Theme.text;
-                font-size: root.compact || root.two-line ? 11px : Theme.font-event;
+                font-size: root.compact ? 11px : Theme.font-event;
                 font-weight: root.all-day || !root.compact ? 600 : 500;
-                wrap: root.two-line ? word-wrap : no-wrap;
+                wrap: root.multi ? word-wrap : no-wrap;
                 overflow: elide;
-                // Last visible line gets the ellipsis when the title does not fit.
-                max-lines: root.two-line ? 2 : 0;
+                max-lines: root.lines;
                 min-width: 0px;
                 horizontal-stretch: 1;
                 vertical-alignment: top;
-                min-height: root.two-line ? line-sample.preferred-height : 0px;
+                min-height: root.title-block;
             }
             if root.show-time && root.time-text != "": Text {
                 text: root.time-text;
@@ -285,6 +284,7 @@ component MonthGrid inherits Rectangle {
     in property <int> offset: 0;
     in property <int> columns: 7;
     in property <int> rows: 6;
+    in property <int> title-lines: 1;
     in property <bool> shade-weekends: true;
     callback select-date(string);
 
@@ -293,14 +293,28 @@ component MonthGrid inherits Rectangle {
     clip: true;
     background: Theme.bg;
 
-    // One grid so header columns and day cells share equal column widths.
-    GridLayout {
+    line-probe := Text {
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        accessible-role: none;
+        text: "Ag";
+        font-size: 11px;
+        font-weight: 600;
+    }
+    property <length> chip-h: line-probe.preferred-height * clamp(root.title-lines, 1, 10) + 4px;
+    property <length> chip-stride: root.chip-h + 2px;
+
+    // Header and week rows share stretch so columns stay equal without a GridLayout repeater.
+    VerticalLayout {
         width: 100%;
         height: 100%;
         spacing: 0px;
         padding: 0px;
 
-        Row {
+        HorizontalLayout {
+            height: 28px;
+            vertical-stretch: 0;
             for w in week-labels: Text {
                 text: w;
                 color: Theme.muted;
@@ -314,11 +328,12 @@ component MonthGrid inherits Rectangle {
                 horizontal-stretch: 1;
             }
         }
-        for row in root.rows: Row {
+        for row in root.rows: HorizontalLayout {
+            vertical-stretch: 1;
             for col in root.columns: ta := TouchArea {
                 property <DayCell> d: days[root.offset + row * root.columns + col];
                 // 16px chip + 2px gap below the 27px label row; one slot is kept for "+N more" on overflow.
-                property <int> max-slots: max(0, floor((self.height - 27px) / 18px));
+                property <int> max-slots: max(0, floor((self.height - 27px) / root.chip-stride));
                 property <int> chip-limit: ta.d.event-count > ta.max-slots
                     ? max(0, ta.max-slots - 1)
                     : ta.d.event-count;
@@ -385,20 +400,21 @@ component MonthGrid inherits Rectangle {
                     // Explicit x/y keeps chips out of the cell's layout size, which `max-slots` reads back.
                     for e in ta.d.events: EventChip {
                         x: 3px;
-                        y: 27px + e.day-ord * 18px;
+                        y: 27px + e.day-ord * root.chip-stride;
                         width: parent.width - 6px;
-                        height: 16px;
+                        height: root.chip-h;
                         visible: e.day-ord < ta.chip-limit;
                         title: e.title;
+                        title-lines: root.title-lines;
                         event-color: e.color;
                         all-day: e.all-day;
                         compact: true;
                     }
                     Text {
                         x: 5px;
-                        y: 27px + ta.chip-limit * 18px;
+                        y: 27px + ta.chip-limit * root.chip-stride;
                         width: parent.width - 10px;
-                        height: 16px;
+                        height: root.chip-h;
                         visible: ta.d.event-count > ta.chip-limit;
                         text: "+" + (ta.d.event-count - ta.chip-limit) + " more";
                         color: Theme.muted;
@@ -434,8 +450,10 @@ export component ZalenderView inherits Rectangle {
     /// Month/year header labels after hidden weekdays are removed.
     in property <[string]> grid-labels;
     in property <int> grid-columns: 7;
-    /// Week rows in each month grid (6 is a full month).
+    /// Week rows in the month grid (from the preset week count).
     in property <int> month-rows: 6;
+    /// Event title lines before ellipsis. The chip grows with this.
+    in property <int> title-lines: 1;
     in property <string> side-title: "";
     in property <[DayCell]> side-days;
     in property <[DayCell]> main-days;
@@ -448,7 +466,17 @@ export component ZalenderView inherits Rectangle {
     property <int> grid-step: hour-slots.length > 0 ? max(1, hour-slots[0].end-mins - hour-slots[0].start-mins) : 60;
     // Per 48px hour row: one chip with time, else two compact chips.
     property <int> timed-max: show-event-time ? 1 : 2;
-    property <length> timed-chip-h: show-event-time ? 44px : 21px;
+    timed-probe := Text {
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        accessible-role: none;
+        text: "Ag";
+        font-size: root.show-event-time ? Theme.font-event : 11px;
+        font-weight: 600;
+    }
+    property <length> timed-chip-h: timed-probe.preferred-height * clamp(root.title-lines, 1, 10)
+        + (root.show-event-time ? 18px : 4px);
     /// Same slots for the month/year day modal hourly list.
     in property <[DayHourBucket]> day-hour-buckets;
     /// Minutes from midnight for the now-lollipop.
@@ -482,7 +510,7 @@ export component ZalenderView inherits Rectangle {
     in property <string> detail-custom-summary: "";
 
     in property <bool> customize-open: false;
-    in property <string> customize-color: "";
+    in property <color> customize-color: #3b82f6;
     in property <string> customize-icon: "";
     in property <bool> customize-occurrence: false;
     in property <bool> customize-has-recurrence: false;
@@ -885,13 +913,11 @@ export component ZalenderView inherits Rectangle {
                         }
                     }
 
-                    // Frozen all-day row — two-line chips; capped so it never steals the hour grid
+                    // All-day chips use the preset title line count and grow the row.
                     HorizontalLayout {
                         spacing: 0px;
                         width: 100%;
                         min-height: 48px;
-                        // Two chips of two lines, plus the cell's padding and the gap between them.
-                        max-height: 104px;
                         vertical-stretch: 0;
                         Text {
                             text: "All day";
@@ -937,12 +963,12 @@ export component ZalenderView inherits Rectangle {
                                         VerticalLayout {
                                             EventChip {
                                                 title: e.title;
+                                                title-lines: root.title-lines;
                                                 time-text: "";
                                                 event-color: e.color;
                                                 all-day: true;
                                                 show-time: false;
                                                 compact: true;
-                                                two-line: true;
                                                 min-width: 0px;
                                                 preferred-width: 0px;
                                                 horizontal-stretch: 1;
@@ -1047,6 +1073,7 @@ export component ZalenderView inherits Rectangle {
                                         clicked => { root.open-event-uid(cell.date-key, e.uid); }
                                         EventChip {
                                             title: e.title;
+                                            title-lines: root.title-lines;
                                             time-text: e.time-short;
                                             event-color: e.color;
                                             show-time: root.show-event-time;
@@ -1112,6 +1139,7 @@ export component ZalenderView inherits Rectangle {
                         days: root.main-days;
                         columns: root.grid-columns;
                         rows: root.month-rows;
+                        title-lines: root.title-lines;
                         offset: m * root.month-rows * root.grid-columns;
                         shade-weekends: root.shade-weekends;
                         vertical-stretch: 1;
@@ -1179,6 +1207,7 @@ export component ZalenderView inherits Rectangle {
                                 clicked => { root.open-event-uid(cell.date-key, e.uid); }
                                 EventChip {
                                     title: e.title;
+                                    title-lines: root.title-lines;
                                     time-text: e.time-short;
                                     event-color: e.color;
                                     all-day: e.all-day;
@@ -1396,36 +1425,58 @@ export component ZalenderView inherits Rectangle {
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: min(420px, parent.width - 48px);
+            width: min(560px, parent.width - 48px);
             clicked => { }
             Rectangle {
                 background: Theme.surface;
                 border-radius: Theme.radius;
                 VerticalLayout {
-                    padding: Theme.pad;
-                    spacing: Theme.pad;
+                    padding: Theme.pad-sm;
+                    spacing: Theme.pad-sm;
                     Text {
                         text: "Name your local calendar";
                         color: Theme.text;
                         font-size: Theme.font-title;
                         font-weight: 700;
-                    }
-                    Text {
-                        text: "This on-device calendar is the default for new events. It stays on this device and cannot be shared.";
-                        color: Theme.muted;
-                        font-size: Theme.font-body;
                         wrap: word-wrap;
-                    }
-                    Field {
-                        caption: "Calendar name";
-                        tip: "Shown as type Local in settings and on events you create.";
-                        text <=> root.name-local-draft;
-                        edited => { root.name-local-set(root.name-local-draft); }
+                        width: 100%;
                     }
                     Text {
-                        text: "Type: Local";
+                        text: "On this device only. Default for new events.";
                         color: Theme.muted;
                         font-size: Theme.font-caption;
+                        wrap: word-wrap;
+                        width: 100%;
+                    }
+                    Rectangle {
+                        height: 40px;
+                        background: Theme.bg;
+                        border-radius: Theme.radius;
+                        border-width: name-input.has-focus ? 2px : 1px;
+                        border-color: name-input.has-focus ? Theme.accent : Theme.surface-2;
+                        property <int> edit-token: TextEditActions.token;
+                        changed edit-token => {
+                            if name-input.has-focus {
+                                if TextEditActions.action == 1 { name-input.cut(); }
+                                if TextEditActions.action == 2 { name-input.copy(); }
+                                if TextEditActions.action == 3 { name-input.paste(); }
+                                if TextEditActions.action == 4 { name-input.select-all(); }
+                            }
+                        }
+                        HorizontalLayout {
+                            padding-left: Theme.pad-sm;
+                            padding-right: Theme.pad-sm;
+                            name-input := TextInput {
+                                text <=> root.name-local-draft;
+                                color: Theme.text;
+                                font-size: Theme.font-body;
+                                single-line: true;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                edited => { root.name-local-set(root.name-local-draft); }
+                            }
+                        }
                     }
                     HorizontalLayout {
                         spacing: Theme.pad-sm;
@@ -1675,27 +1726,9 @@ export component ZalenderView inherits Rectangle {
                         }
                     }
                     Text { text: "Color"; color: Theme.muted; font-size: Theme.font-caption; }
-                    HorizontalLayout {
-                        spacing: 6px;
-                        for c in [
-                            { hex: "#3b82f6", brush: #3b82f6 },
-                            { hex: "#2563eb", brush: #2563eb },
-                            { hex: "#1d4ed8", brush: #1d4ed8 },
-                            { hex: "#ef4444", brush: #ef4444 },
-                            { hex: "#22c55e", brush: #22c55e },
-                            { hex: "#eab308", brush: #eab308 },
-                            { hex: "#a855f7", brush: #a855f7 },
-                            { hex: "#f97316", brush: #f97316 },
-                        ]: TouchArea {
-                            width: 40px; height: 40px;
-                            clicked => { root.customize-set-color(c.hex); }
-                            Rectangle {
-                                border-radius: 20px;
-                                background: c.brush;
-                                border-width: c.hex == root.customize-color ? 3px : 0;
-                                border-color: Theme.text;
-                            }
-                        }
+                    ColorBox {
+                        value: root.customize-color;
+                        picked(hex) => { root.customize-set-color(hex); }
                     }
                     Text { text: "Icon"; color: Theme.muted; font-size: Theme.font-caption; }
                     HorizontalLayout {
@@ -1750,9 +1783,18 @@ export component ZalenderView inherits Rectangle {
                                     min-height: f.field-type == 1 ? 80px : Theme.touch-min;
                                     background: Theme.surface-2;
                                     border-radius: Theme.radius;
+                                    property <int> edit-token: TextEditActions.token;
+                                    changed edit-token => {
+                                        if custom-field-input.has-focus {
+                                            if TextEditActions.action == 1 { custom-field-input.cut(); }
+                                            if TextEditActions.action == 2 { custom-field-input.copy(); }
+                                            if TextEditActions.action == 3 { custom-field-input.paste(); }
+                                            if TextEditActions.action == 4 { custom-field-input.select-all(); }
+                                        }
+                                    }
                                     HorizontalLayout {
                                         padding: 8px;
-                                        TextInput {
+                                        custom-field-input := TextInput {
                                             text: f.value;
                                             color: Theme.text;
                                             font-size: Theme.font-body;

@@ -17,6 +17,15 @@ finish-args:
   - --filesystem=xdg-config/wijitify:create
   - --filesystem=xdg-cache/wijitify:create
 modules:
+  # Wayland clipboard tools for GNOME/Flatpak (no wlr-data-control). finish-args unchanged.
+  - name: wl-clipboard
+    buildsystem: meson
+    config-opts:
+      - -Dfishcompletiondir=no
+    sources:
+      - type: archive
+        url: https://github.com/bugaevc/wl-clipboard/archive/refs/tags/v2.2.1.tar.gz
+        sha256: 6eb8081207fb5581d1d82c4bcd9587205a31a3d47bea3ebeb7f41aa1143783eb
   - name: wijitify
     buildsystem: simple
     build-options:
@@ -25,6 +34,7 @@ modules:
         CARGO_HOME: /run/build/wijitify/cargo
         RUST_BACKTRACE: "1"
     build-commands:
+      - python3 packaging/flatpak/apply-vendor-patches.py
       - cargo --offline build --release --locked
       - install -Dm755 target/release/wijitify /app/bin/wijitify
       - install -Dm644 packaging/flatpak/io.github.JordHV.Wijitify.desktop /app/share/applications/io.github.JordHV.Wijitify.desktop

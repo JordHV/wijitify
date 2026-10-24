@@ -4556,6 +4556,7 @@ dependencies = [
  "const-field-offset",
  "i-slint-backend-linuxkms",
  "i-slint-backend-selector",
+ "i-slint-backend-winit",
  "i-slint-common",
  "i-slint-core",
  "i-slint-core-macros",
@@ -5907,7 +5908,7 @@ dependencies = [
 
 [[package]]
 name = "wijitify"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "ashpd",

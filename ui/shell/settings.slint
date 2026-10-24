@@ -339,6 +339,8 @@ export component SettingsOverlay inherits Rectangle {
     in property <[WeekdayCheck]> preset-weekdays;
     in property <int> preset-month-weeks: 6;
     in property <bool> preset-month-from-week: false;
+    in property <int> preset-title-lines: 1;
+    in property <[string]> title-line-options;
     in property <[string]> week-count-options;
     in property <[string]> unit-options;
     in property <[string]> count-options;
@@ -409,6 +411,7 @@ export component SettingsOverlay inherits Rectangle {
     callback set-preset-weekday(int, bool);
     callback set-preset-month-weeks(int);
     callback set-preset-month-from-week(bool);
+    callback set-preset-title-lines(int);
     callback set-week-start(int);
     callback set-datetime-format(int);
     callback set-font-family(int);
@@ -862,37 +865,40 @@ export component SettingsOverlay inherits Rectangle {
                                 spacing: Theme.pad-sm;
                                 alignment: stretch;
                                 cross-axis-alignment: center;
-                                Rectangle {
+                                TouchArea {
                                     horizontal-stretch: 1;
                                     min-width: 0px;
                                     min-height: Theme.touch-min;
-                                    background: Theme.surface;
-                                    border-radius: Theme.radius;
-                                    HorizontalLayout {
-                                        padding-left: Theme.pad-sm;
-                                        padding-right: Theme.pad-sm;
-                                        spacing: Theme.pad-sm;
-                                        alignment: start;
-                                        cross-axis-alignment: center;
-                                        Text {
-                                            text: p.name + (p.is-hot ? "  · default" : "");
-                                            color: Theme.text;
-                                            font-size: Theme.font-body;
-                                            font-weight: 600;
-                                            vertical-alignment: center;
-                                            horizontal-alignment: left;
-                                            min-width: 0px;
-                                            overflow: elide;
-                                        }
-                                        Text {
-                                            text: p.summary;
-                                            color: Theme.muted;
-                                            font-size: Theme.font-caption;
-                                            vertical-alignment: center;
-                                            horizontal-alignment: left;
-                                            min-width: 0px;
-                                            horizontal-stretch: 1;
-                                            overflow: elide;
+                                    clicked => { root.open-preset-edit(i); }
+                                    Rectangle {
+                                        background: parent.pressed ? Theme.surface-press : Theme.surface;
+                                        border-radius: Theme.radius;
+                                        HorizontalLayout {
+                                            padding-left: Theme.pad-sm;
+                                            padding-right: Theme.pad-sm;
+                                            spacing: Theme.pad-sm;
+                                            alignment: start;
+                                            cross-axis-alignment: center;
+                                            Text {
+                                                text: p.name + (p.is-hot ? "  · default" : "");
+                                                color: Theme.text;
+                                                font-size: Theme.font-body;
+                                                font-weight: 600;
+                                                vertical-alignment: center;
+                                                horizontal-alignment: left;
+                                                min-width: 0px;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: p.summary;
+                                                color: Theme.muted;
+                                                font-size: Theme.font-caption;
+                                                vertical-alignment: center;
+                                                horizontal-alignment: left;
+                                                min-width: 0px;
+                                                horizontal-stretch: 1;
+                                                overflow: elide;
+                                            }
                                         }
                                     }
                                 }
@@ -1311,7 +1317,7 @@ export component SettingsOverlay inherits Rectangle {
                         content-width: self.width;
                         VerticalLayout {
                             width: parent.width;
-                            spacing: Theme.pad-sm;
+                            spacing: 0;
                             alignment: start;
 
                             if !preset-is-builtin: SettingRow {
@@ -1324,6 +1330,7 @@ export component SettingsOverlay inherits Rectangle {
                                     edited => { root.set-preset-name(root.preset-name); }
                                 }
                             }
+                            if !preset-is-builtin: SettingsDivider {}
                             if !preset-is-builtin: Dropdown {
                                 inline: true;
                                 caption: "View";
@@ -1345,34 +1352,36 @@ export component SettingsOverlay inherits Rectangle {
                                     vertical-alignment: center;
                                 }
                             }
-                            Dropdown {
+                            if preset-unit != 2: SettingsDivider {}
+                            if preset-unit != 2: Dropdown {
                                 inline: true;
                                 compact: true;
-                                caption: root.preset-unit == 2 ? "Month count" : "Count";
-                                tip: root.preset-unit == 2
-                                    ? "How many month grids to show. With Start on this week, each one is another window of Week count."
-                                    : "How many of the selected unit to show at once (Day 2 = two days; Agenda count is weeks).";
+                                caption: "Count";
+                                tip: "How many of the selected unit to show at once (Day 2 = two days; Agenda count is weeks).";
                                 options: root.count-options;
                                 selected: root.preset-count - 1;
                                 changed(i) => { root.set-preset-count(i + 1); }
                             }
+                            if preset-unit == 2: SettingsDivider {}
                             if preset-unit == 2: Dropdown {
                                 inline: true;
                                 compact: true;
                                 caption: "Week count";
-                                tip: "Week rows in the month grid. 6 is a full month. 2 with Start on this week is this week and the next.";
+                                tip: "With Start on this week, 1 is that week and 2 adds the next. Off, the grid starts on the week of the 1st and runs through the week you are viewing; 1 stops there, 2 also shows the next week.";
                                 options: root.week-count-options;
                                 selected: root.preset-month-weeks - 1;
                                 changed(i) => { root.set-preset-month-weeks(i + 1); }
                             }
+                            if preset-unit == 2: SettingsDivider {}
                             if preset-unit == 2: SettingRow {
                                 label: "Start on this week";
-                                tip: "Top row is the week of the date you are viewing, instead of the first week of the month. Arrows move forward by the week count.";
+                                tip: "On: the top row is the week you are viewing, and week count is how many rows. Off: rows start on the week of the 1st and continue through that week, plus any extra weeks from the week count.";
                                 Switch {
                                     checked: root.preset-month-from-week;
                                     toggled => { root.set-preset-month-from-week(self.checked); }
                                 }
                             }
+                            SettingsDivider {}
                             Dropdown {
                                 inline: true;
                                 caption: "Anchor";
@@ -1381,6 +1390,7 @@ export component SettingsOverlay inherits Rectangle {
                                 selected: root.preset-anchor;
                                 changed(i) => { root.set-preset-anchor(i); }
                             }
+                            SettingsDivider {}
                             SettingRow {
                                 label: "Days";
                                 tip: "Uncheck a weekday to hide it in this preset (day, week, month, year, and agenda). At least one day stays on.";
@@ -1420,6 +1430,17 @@ export component SettingsOverlay inherits Rectangle {
                                     }
                                 }
                             }
+                            SettingsDivider {}
+                            Dropdown {
+                                inline: true;
+                                compact: true;
+                                caption: "Title lines";
+                                tip: "How many lines an event title uses before it ends with …. 2 wraps once. The event box in the view grows to fit.";
+                                options: root.title-line-options;
+                                selected: root.preset-title-lines - 1;
+                                changed(i) => { root.set-preset-title-lines(i + 1); }
+                            }
+                            if preset-unit == 0 || preset-unit == 1: SettingsDivider {}
                             if preset-unit == 0 || preset-unit == 1: Dropdown {
                                 inline: true;
                                 caption: "Day grid starts";
@@ -1428,6 +1449,7 @@ export component SettingsOverlay inherits Rectangle {
                                 selected: root.preset-day-start-hour;
                                 changed(i) => { root.set-preset-day-start(i); }
                             }
+                            if preset-unit == 0 || preset-unit == 1: SettingsDivider {}
                             if preset-unit == 0 || preset-unit == 1: Dropdown {
                                 inline: true;
                                 caption: "Day grid ends";
@@ -1436,6 +1458,7 @@ export component SettingsOverlay inherits Rectangle {
                                 selected: root.preset-day-end-hour;
                                 changed(i) => { root.set-preset-day-end(i); }
                             }
+                            if preset-unit == 0 || preset-unit == 1: SettingsDivider {}
                             if preset-unit == 0 || preset-unit == 1: Dropdown {
                                 inline: true;
                                 caption: "Time interval";
@@ -1444,7 +1467,7 @@ export component SettingsOverlay inherits Rectangle {
                                 selected: root.preset-day-interval;
                                 changed(i) => { root.set-preset-day-interval(i); }
                             }
-                            if !preset-is-builtin: Rectangle { height: 1px; background: Theme.surface-2; }
+                            if !preset-is-builtin: SettingsDivider {}
                             if !preset-is-builtin: HorizontalLayout {
                                 spacing: Theme.pad-sm;
                                 alignment: start;

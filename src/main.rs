@@ -18,6 +18,11 @@ fn main() -> anyhow::Result<()> {
 
     let windowed = std::env::args().any(|a| a == "--windowed");
 
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .select()
+        .context("select winit backend")?;
+
     let paths = Paths::discover().context("resolve paths")?;
     let config = Config::load(&paths).context("load config")?;
     let runtime = TaskRuntime::start();
@@ -26,6 +31,8 @@ fn main() -> anyhow::Result<()> {
     if !windowed {
         ui.window().set_fullscreen(true);
     }
+
+    app::touch_edit::install(&ui);
 
     let ctx = Rc::new(RefCell::new(bridge::AppCtx::new(paths, config, runtime)));
     bridge::bind(&ui, ctx.clone());
