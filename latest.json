@@ -1,0 +1,5 @@
+{
+  "version": "0.3.2",
+  "notes": "### Fixed\n\n- Publish the Surface Flatpak keyboard and clipboard fixes. The v0.3.1 tag failed CI before publish: patched vendored crates nulled their package checksum, so `cargo --offline build --release --locked` rejected `Cargo.lock`\n- Vendored Flatpak patches keep that package checksum and only skip per-file checks",
+  "published": "2026-10-24"
+}

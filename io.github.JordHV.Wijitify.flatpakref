@@ -1,0 +1,9 @@
+[Flatpak Ref]
+Name=io.github.JordHV.Wijitify
+Branch=stable
+Title=Wijitify
+Url=https://jordhv.github.io/wijitify/repo
+Homepage=https://github.com/JordHV/wijitify
+IsRuntime=false
+GPGKey=mDMEateN7hYJKwYBBAHaRw8BAQdAK/EjTbKyX+FeTvJh1O2wFRmQYO0obYE5XaHikBROP4+0K1dpaml0aWZ5IFJlbGVhc2VzIDxyZWxlYXNlc0B3aWppdGlmeS5sb2NhbD6IkwQTFgoAOxYhBMZLXXMM3d9CpOXo6fOFjiqe0wHFBQJq143uAhsDBQsJCAcCAiICBhUKCQgLAgQWAgMBAh4HAheAAAoJEPOFjiqe0wHF4XsA/RbW/+rVxAEvIUUSjsPPhj9OrM3Z7xf+eY/40LkLuHX6AP4k6ezJEWxV9IHYtP6iNPhReLCTt7FSRNVHMk37QgKqAw==
+RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
