@@ -8,8 +8,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slint::{ComponentHandle, Timer, TimerMode};
 use slint::winit_030::{winit, EventResult, WinitWindowAccessor};
+use slint::{ComponentHandle, Timer, TimerMode};
 
 use super::bridge::AppWindow;
 
