@@ -388,10 +388,7 @@ impl UiFontFamily {
     }
 
     pub fn as_i32(self) -> i32 {
-        Self::all()
-            .iter()
-            .position(|f| *f == self)
-            .unwrap_or(0) as i32
+        Self::all().iter().position(|f| *f == self).unwrap_or(0) as i32
     }
 
     pub fn from_i32(v: i32) -> Self {

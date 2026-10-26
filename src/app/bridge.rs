@@ -2329,7 +2329,10 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                 c.customize_fields.insert(id.clone(), val.to_string());
                 c.config.zalender().custom_fields.iter().any(|f| {
                     f.id == id
-                        && matches!(f.field_type, CustomFieldType::Bool | CustomFieldType::Choice)
+                        && matches!(
+                            f.field_type,
+                            CustomFieldType::Bool | CustomFieldType::Choice
+                        )
                 })
             };
             if refresh {
@@ -3289,7 +3292,11 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
     let (main_days, year_titles) =
         build_main_days(c, &z, today, week_start, &visible, slot_grid, &hour_preset);
     let all_day_rows = if matches!(c.view_unit, ViewUnit::Day | ViewUnit::Week) {
-        main_days.iter().map(|cell| cell.all_day_count).max().unwrap_or(0)
+        main_days
+            .iter()
+            .map(|cell| cell.all_day_count)
+            .max()
+            .unwrap_or(0)
     } else {
         0
     };
