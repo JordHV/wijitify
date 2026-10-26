@@ -40,16 +40,17 @@ Each module ships Slint **views** and a **setup page**. The shell switches by mo
 
 If `setup_complete` is false (or no config): pick modules → walk setup pages for selected modules → atomic save with `setup_complete = true` → start enabled modules → home.
 
-## Config shape (schema_version = 7)
+## Config shape (schema_version = 8)
 
 ```toml
-schema_version = 7
+schema_version = 8
 setup_complete = true
 theme = "dark" # or "light"; selecting a theme resets palette defaults
 accent = "#3b82f6" # mirrored from palette.accent
 datetime_format = "dd_mm_yy_am_pm"
-font_family = "system" # system | sans | serif | mono
-font_scale = "medium" # small | medium | large | x_large
+font_family = "system" # system | sans | serif | mono | display | condensed | hand | bungee
+font_scale = "medium" # small | medium | large | x_large — app chrome, not event chips
+event_font_scale = "medium" # event titles and times on the calendar main view
 
 [palette]
 bg = "#0f1419"

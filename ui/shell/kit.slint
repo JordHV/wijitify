@@ -47,6 +47,7 @@ export component Button inherits TouchArea {
             border-color: Theme.surface-press;
 
             label := Text {
+                font-family: Theme.font-family;
                 text: root.label;
                 color: root.role == "secondary" ? Theme.text : Theme.text-on-accent;
                 font-size: Theme.font-body;
@@ -105,6 +106,7 @@ export component PillButton inherits TouchArea {
     min-height: Theme.touch-min;
     horizontal-stretch: 0;
     label-size := Text {
+        font-family: Theme.font-family;
         text: root.label;
         font-size: Theme.font-body;
         font-weight: 600;
@@ -130,6 +132,7 @@ export component PillButton inherits TouchArea {
         border-width: 1px;
         border-color: Theme.surface-press;
         Text {
+            font-family: Theme.font-family;
             x: 14px;
             y: 0;
             width: parent.width - 28px;
@@ -174,6 +177,7 @@ export component ViewPill inherits TouchArea {
             spacing: 10px;
             alignment: center;
             Text {
+                font-family: Theme.font-family;
                 text: root.label;
                 color: Theme.text;
                 font-size: Theme.font-body;
@@ -221,6 +225,7 @@ export component ViewPill inherits TouchArea {
                             padding-left: 14px;
                             padding-right: 14px;
                             Text {
+                                font-family: Theme.font-family;
                                 text: opt;
                                 color: i == root.selected ? Theme.text-on-accent : Theme.text;
                                 font-size: Theme.font-body;
@@ -267,6 +272,7 @@ export component InfoTip inherits TouchArea {
             VerticalLayout {
                 padding: Theme.pad-sm;
                 Text {
+                    font-family: Theme.font-family;
                     text: root.text;
                     color: Theme.text;
                     font-size: Theme.font-caption;
@@ -300,6 +306,7 @@ export component Field inherits VerticalLayout {
         alignment: stretch;
         cross-axis-alignment: center;
         Text {
+            font-family: Theme.font-family;
             text: root.caption;
             color: Theme.muted;
             font-size: Theme.font-caption;
@@ -315,15 +322,27 @@ export component Field inherits VerticalLayout {
         border-radius: Theme.radius;
         border-width: field-input.has-focus ? 2px : 0;
         border-color: Theme.accent;
+        // TextInput only takes clicks on its own box. The layout used to size that
+        // box to the glyphs, so the rest of the field did nothing.
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => { field-input.focus(); }
+        }
         HorizontalLayout {
+            width: 100%;
+            height: 100%;
             padding: Theme.pad-sm;
             alignment: stretch;
             field-input := TextInput {
+                font-family: Theme.font-family;
                 text <=> root.text;
                 color: Theme.text;
                 font-size: Theme.font-body;
                 single-line: true;
                 horizontal-alignment: left;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
                 vertical-stretch: 1;
                 edited => { root.edited(); }
             }
@@ -334,6 +353,7 @@ export component Field inherits VerticalLayout {
 export component LongField inherits VerticalLayout {
     in property <string> caption;
     in-out property <string> text;
+    callback edited();
     spacing: 4px;
 
     property <int> edit-token: TextEditActions.token;
@@ -347,25 +367,40 @@ export component LongField inherits VerticalLayout {
     }
 
     Text {
+        font-family: Theme.font-family;
         text: root.caption;
         color: Theme.muted;
         font-size: Theme.font-caption;
     }
     Rectangle {
         min-height: 96px;
+        vertical-stretch: 1;
         background: Theme.surface;
         border-radius: Theme.radius;
         border-width: field-input.has-focus ? 2px : 0;
         border-color: Theme.accent;
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => { field-input.focus(); }
+        }
         VerticalLayout {
+            width: 100%;
+            height: 100%;
             padding: Theme.pad-sm;
+            alignment: stretch;
             field-input := TextInput {
+                font-family: Theme.font-family;
                 text <=> root.text;
                 color: Theme.text;
                 font-size: Theme.font-body;
                 single-line: false;
                 wrap: word-wrap;
+                horizontal-alignment: left;
+                vertical-alignment: top;
+                horizontal-stretch: 1;
                 vertical-stretch: 1;
+                edited => { root.edited(); }
             }
         }
     }
@@ -416,12 +451,14 @@ export component Row inherits TouchArea {
                 alignment: start;
                 horizontal-stretch: 1;
                 Text {
+                    font-family: Theme.font-family;
                     text: root.title;
                     color: Theme.text;
                     font-size: Theme.font-body;
                     horizontal-alignment: left;
                 }
                 if caption != "": Text {
+                    font-family: Theme.font-family;
                     text: root.caption;
                     color: Theme.muted;
                     font-size: Theme.font-caption;
@@ -445,6 +482,7 @@ export component Banner inherits Rectangle {
         padding-top: 6px;
         padding-bottom: 6px;
         Text {
+            font-family: Theme.font-family;
             text: root.message;
             color: root.kind == 1 ? Theme.ok
                 : root.kind == 2 ? Theme.accent
@@ -472,6 +510,7 @@ export component SettingRow inherits HorizontalLayout {
     horizontal-stretch: 1;
 
     if root.label != "": Text {
+        font-family: Theme.font-family;
         text: root.label;
         color: Theme.muted;
         font-size: Theme.font-body;
@@ -535,20 +574,28 @@ export component ShortInput inherits Rectangle {
         border-width: input.has-focus ? 2px : 1px;
         border-color: input.has-focus ? Theme.accent : Theme.surface-2;
 
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => { input.focus(); }
+        }
         HorizontalLayout {
+            width: 100%;
             height: 100%;
             padding-left: Theme.pad-sm;
             padding-right: Theme.pad-sm;
-            alignment: center;
-            cross-axis-alignment: center;
+            alignment: stretch;
             input := TextInput {
+                font-family: Theme.font-family;
                 text <=> root.text;
                 color: Theme.text;
                 font-size: Theme.font-body;
                 font-weight: root.font-weight;
                 single-line: true;
+                horizontal-alignment: left;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
+                vertical-stretch: 1;
                 edited => { root.edited(); }
             }
         }
@@ -567,6 +614,7 @@ export component Switch inherits HorizontalLayout {
     min-height: Theme.touch-min;
 
     if label != "": Text {
+        font-family: Theme.font-family;
         text: root.label;
         color: Theme.text;
         font-size: Theme.font-body;
@@ -608,6 +656,8 @@ export component Dropdown inherits VerticalLayout {
     in property <string> caption: "";
     in property <string> tip: "";
     in property <[string]> options;
+    /// When set, each menu row is drawn in this face (same length as `options`). Empty string = system font.
+    in property <[string]> option-fonts;
     in-out property <int> selected: 0;
     /// Caption, info, and the selector share one row. The selector sits on the right.
     in property <bool> inline: false;
@@ -626,6 +676,7 @@ export component Dropdown inherits VerticalLayout {
         alignment: stretch;
         cross-axis-alignment: center;
         if root.caption != "": Text {
+            font-family: Theme.font-family;
             text: root.caption;
             color: Theme.muted;
             font-size: Theme.font-body;
@@ -641,6 +692,7 @@ export component Dropdown inherits VerticalLayout {
         alignment: stretch;
         cross-axis-alignment: center;
         if root.inline && root.caption != "": Text {
+            font-family: Theme.font-family;
             text: root.caption;
             color: Theme.muted;
             font-size: Theme.font-body;
@@ -676,6 +728,7 @@ export component Dropdown inherits VerticalLayout {
                     alignment: center;
                     cross-axis-alignment: center;
                     Text {
+                        font-family: Theme.font-family;
                         text: root.current;
                         color: Theme.text;
                         font-size: Theme.font-body;
@@ -736,6 +789,7 @@ export component Dropdown inherits VerticalLayout {
                                         padding-right: Theme.pad-sm;
                                         Text {
                                             text: opt;
+                                            font-family: i < root.option-fonts.length ? root.option-fonts[i] : Theme.font-family;
                                             color: i == root.selected ? Theme.text-on-accent : Theme.text;
                                             font-size: Theme.font-body;
                                             vertical-alignment: center;
@@ -780,6 +834,7 @@ export component Tip inherits Rectangle {
         HorizontalLayout {
             padding: 6px;
             Text {
+                font-family: Theme.font-family;
                 text: root.text;
                 color: Theme.text;
                 font-size: Theme.font-caption;
@@ -800,7 +855,9 @@ export component ColorBox inherits TouchArea {
     property <float> hue: root.dragging ? root.drag-h : root.value.to-hsv().hue;
     property <float> sat: root.dragging ? root.drag-s : root.value.to-hsv().saturation;
     property <float> val: root.dragging ? root.drag-v : root.value.to-hsv().value;
-    property <color> shown: hsv(root.hue, root.sat, root.val);
+    // Parents read this in `picked` while the drag is still active, then bind it
+    // back to `value`. Without that, the thumb jumps to the old color on release.
+    out property <color> shown: hsv(root.hue, root.sat, root.val);
 
     function hex-digit(n: int) -> string {
         n <= 0 ? "0" : n == 1 ? "1" : n == 2 ? "2" : n == 3 ? "3" : n == 4 ? "4"
@@ -827,18 +884,22 @@ export component ColorBox inherits TouchArea {
         root.dragging = false;
     }
 
-    min-width: Theme.touch-min;
+    // Bar is three times the old 36px square, still tall enough to tap.
+    property <length> chip: 36px;
+    min-width: root.chip * 3;
+    preferred-width: root.chip * 3;
+    max-width: root.chip * 3;
     min-height: Theme.touch-min;
     horizontal-stretch: 0;
 
     Rectangle {
-        width: 36px;
-        height: 36px;
+        width: root.chip * 3;
+        height: root.chip;
         border-radius: 6px;
         background: root.shown;
         border-width: 2px;
         border-color: menu.is-open ? Theme.text : Theme.surface-press;
-        x: (parent.width - self.width) / 2;
+        x: 0;
         y: (parent.height - self.height) / 2;
     }
 

@@ -1,7 +1,7 @@
 pub mod local_events;
 pub mod model;
 pub mod overrides;
-mod recur;
+pub mod recur;
 mod source;
 pub mod view;
 

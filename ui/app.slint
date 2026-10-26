@@ -1,4 +1,15 @@
 import { Theme } from "./theme.slint";
+// Bundled UI faces (SIL OFL — licenses in assets/fonts/ui). Family names match the name table.
+import "../assets/fonts/ui/Nunito.ttf";
+import "../assets/fonts/ui/LibreBaskerville.ttf";
+import "../assets/fonts/ui/IBMPlexMono-Regular.ttf";
+import "../assets/fonts/ui/IBMPlexMono-Medium.ttf";
+import "../assets/fonts/ui/IBMPlexMono-SemiBold.ttf";
+import "../assets/fonts/ui/IBMPlexMono-Bold.ttf";
+import "../assets/fonts/ui/PlayfairDisplay.ttf";
+import "../assets/fonts/ui/Oswald.ttf";
+import "../assets/fonts/ui/Caveat.ttf";
+import "../assets/fonts/ui/Bungee.ttf";
 import { Icons } from "./icons.slint";
 import { IconButton, TextEditActions } from "./shell/kit.slint";
 import {
@@ -7,12 +18,12 @@ import {
 } from "./shell/settings.slint";
 import { SetupFlow, SetupModuleRow, FeedRow } from "./setup/setup.slint";
 import {
-    ZalenderView, DayCell, FeedChip, EventRow, CustomFieldRow, DayHourBucket
+    ZalenderView, DayCell, FeedChip, EventRow, CustomFieldRow, ChoiceOption, DayHourBucket, RepeatWeekday
 } from "./modules/zalender/views.slint";
 
 export {
     Theme, ModuleToggleRow, SetupModuleRow, FeedRow, DayCell,
-    FeedChip, EventRow, CustomFieldRow, DayHourBucket, SettingsFeedRow, SettingsFieldDefRow, ThemeColorRow,
+    FeedChip, EventRow, CustomFieldRow, ChoiceOption, DayHourBucket, RepeatWeekday, SettingsFeedRow, SettingsFieldDefRow, ThemeColorRow,
     SettingsPresetRow, WeekdayCheck
 }
 
@@ -88,7 +99,9 @@ export component AppWindow inherits Window {
     in property <[string]> datetime-options;
     in property <int> font-family: 0;
     in property <[string]> font-family-options;
+    in property <[string]> font-family-faces;
     in property <int> font-scale: 1;
+    in property <int> event-font-scale: 1;
     in property <[string]> font-scale-options;
     in property <bool> modal-show-time: true;
     in property <bool> modal-show-title: true;
@@ -100,6 +113,7 @@ export component AppWindow inherits Window {
     in-out property <string> new-field-name: "";
     in property <int> new-field-type: 0;
     in property <[string]> field-type-options;
+    in property <[string]> new-field-options;
     in property <string> help-text: "";
     in property <string> current-version: "";
     in property <int> update-status: 0;
@@ -132,13 +146,13 @@ export component AppWindow inherits Window {
     in property <int> zal-grid-columns: 7;
     in property <int> zal-month-rows: 6;
     in property <int> zal-title-lines: 1;
+    in property <int> zal-all-day-rows: 0;
     in property <string> zal-side-title: "";
     in property <[DayCell]> zal-side-days;
     in property <[DayCell]> zal-main-days;
     in property <[string]> zal-year-month-titles;
     in property <[FeedChip]> zal-feeds;
     in property <[DayHourBucket]> zal-hour-slots;
-    in property <[DayHourBucket]> zal-day-hour-buckets;
     in property <int> zal-now-mins: 0;
     in property <bool> zal-show-event-time: false;
     in property <bool> zal-dim-past: true;
@@ -151,6 +165,8 @@ export component AppWindow inherits Window {
     in-out property <string> zal-name-local-draft: "";
     in-out property <bool> zal-create-event-open: false;
     in-out property <string> zal-create-title: "";
+    in-out property <string> zal-create-location: "";
+    in-out property <string> zal-create-description: "";
     in property <string> zal-create-date-key: "";
     in property <string> zal-create-date-label: "";
     in property <int> zal-create-start-mins: 540;
@@ -159,6 +175,21 @@ export component AppWindow inherits Window {
     in property <string> zal-create-calendar-name: "";
     in property <string> zal-create-start-label: "";
     in property <string> zal-create-end-label: "";
+    in property <bool> zal-create-repeat: false;
+    in property <bool> zal-create-repeat-open: false;
+    in property <string> zal-create-repeat-summary: "";
+    in property <int> zal-create-repeat-interval: 1;
+    in property <int> zal-create-repeat-unit: 0;
+    in property <[string]> zal-create-repeat-units;
+    in property <int> zal-create-repeat-end: 0;
+    in property <string> zal-create-until-label: "";
+    in property <int> zal-create-repeat-count: 10;
+    in property <[RepeatWeekday]> zal-create-weekdays;
+    in property <bool> zal-create-by-weekday: false;
+    in property <string> zal-create-month-dom-label: "";
+    in property <string> zal-create-month-nth-label: "";
+    in property <string> zal-create-quarter-dom-label: "";
+    in property <string> zal-create-quarter-nth-label: "";
     in property <bool> zal-event-detail-open: false;
     in property <EventRow> zal-detail-event;
     in property <string> zal-detail-custom-summary: "";
@@ -168,6 +199,7 @@ export component AppWindow inherits Window {
     in property <bool> zal-customize-occurrence: false;
     in property <bool> zal-customize-has-recurrence: false;
     in property <[CustomFieldRow]> zal-customize-fields;
+    in property <[ChoiceOption]> zal-customize-choices;
     in property <bool> zal-edit-placeholder-open: false;
 
     callback setup-toggle-module(int);
@@ -209,6 +241,7 @@ export component AppWindow inherits Window {
     callback settings-set-datetime-format(int);
     callback settings-set-font-family(int);
     callback settings-set-font-scale(int);
+    callback settings-set-event-font-scale(int);
     callback settings-set-modal-show-time(bool);
     callback settings-set-modal-show-title(bool);
     callback settings-set-modal-show-calendar(bool);
@@ -218,6 +251,9 @@ export component AppWindow inherits Window {
     callback settings-add-custom-field();
     callback settings-remove-custom-field(int);
     callback settings-set-new-field-type(int);
+    callback settings-set-new-field-option(int, string);
+    callback settings-add-field-option();
+    callback settings-remove-field-option(int);
     callback run-setup-again();
     callback quit-app();
     callback check-updates();
@@ -236,9 +272,22 @@ export component AppWindow inherits Window {
     callback zal-toggle-feed(int);
     callback zal-set-default-feed(int);
     callback zal-close-day-modal();
-    callback zal-open-create-event(string, int);
+    callback zal-open-create-event(string, int, bool);
     callback zal-close-create-event();
     callback zal-create-set-title(string);
+    callback zal-create-set-location(string);
+    callback zal-create-set-description(string);
+    callback zal-create-shift-date(int);
+    callback zal-create-open-repeat();
+    callback zal-create-close-repeat();
+    callback zal-create-clear-repeat();
+    callback zal-create-set-repeat-interval(int);
+    callback zal-create-set-repeat-unit(int);
+    callback zal-create-set-repeat-end(int);
+    callback zal-create-shift-until(int);
+    callback zal-create-set-repeat-count(int);
+    callback zal-create-toggle-weekday(int);
+    callback zal-create-set-by-weekday(bool);
     callback zal-create-set-all-day(bool);
     callback zal-create-set-start-mins(int);
     callback zal-create-set-end-mins(int);
@@ -304,17 +353,18 @@ export component AppWindow inherits Window {
                 grid-columns: root.zal-grid-columns;
                 month-rows: root.zal-month-rows;
                 title-lines: root.zal-title-lines;
+                all-day-rows: root.zal-all-day-rows;
                 side-title: root.zal-side-title;
                 side-days: root.zal-side-days;
                 main-days: root.zal-main-days;
                 year-month-titles: root.zal-year-month-titles;
                 feeds: root.zal-feeds;
                 hour-slots: root.zal-hour-slots;
-                day-hour-buckets: root.zal-day-hour-buckets;
                 now-mins: root.zal-now-mins;
                 show-event-time: root.zal-show-event-time;
                 dim-past: root.zal-dim-past;
                 shade-weekends: root.zal-shade-weekends;
+                hide-scrim: root.settings-open;
                 day-modal-open: root.zal-day-modal-open;
                 day-modal-title: root.zal-day-modal-title;
                 selected-date-key: root.zal-selected-date-key;
@@ -323,6 +373,8 @@ export component AppWindow inherits Window {
                 name-local-draft <=> root.zal-name-local-draft;
                 create-event-open: root.zal-create-event-open;
                 create-title <=> root.zal-create-title;
+                create-location <=> root.zal-create-location;
+                create-description <=> root.zal-create-description;
                 create-date-key: root.zal-create-date-key;
                 create-date-label: root.zal-create-date-label;
                 create-start-mins: root.zal-create-start-mins;
@@ -331,6 +383,21 @@ export component AppWindow inherits Window {
                 create-calendar-name: root.zal-create-calendar-name;
                 create-start-label: root.zal-create-start-label;
                 create-end-label: root.zal-create-end-label;
+                create-repeat: root.zal-create-repeat;
+                create-repeat-open: root.zal-create-repeat-open;
+                create-repeat-summary: root.zal-create-repeat-summary;
+                create-repeat-interval: root.zal-create-repeat-interval;
+                create-repeat-unit: root.zal-create-repeat-unit;
+                create-repeat-units: root.zal-create-repeat-units;
+                create-repeat-end: root.zal-create-repeat-end;
+                create-until-label: root.zal-create-until-label;
+                create-repeat-count: root.zal-create-repeat-count;
+                create-weekdays: root.zal-create-weekdays;
+                create-by-weekday: root.zal-create-by-weekday;
+                create-month-dom-label: root.zal-create-month-dom-label;
+                create-month-nth-label: root.zal-create-month-nth-label;
+                create-quarter-dom-label: root.zal-create-quarter-dom-label;
+                create-quarter-nth-label: root.zal-create-quarter-nth-label;
                 event-detail-open: root.zal-event-detail-open;
                 detail-event: root.zal-detail-event;
                 detail-custom-summary: root.zal-detail-custom-summary;
@@ -340,6 +407,7 @@ export component AppWindow inherits Window {
                 customize-occurrence: root.zal-customize-occurrence;
                 customize-has-recurrence: root.zal-customize-has-recurrence;
                 customize-fields: root.zal-customize-fields;
+                customize-choices: root.zal-customize-choices;
                 edit-placeholder-open: root.zal-edit-placeholder-open;
                 prev-period => { root.zal-prev-period(); }
                 next-period => { root.zal-next-period(); }
@@ -354,9 +422,22 @@ export component AppWindow inherits Window {
                 toggle-feed(i) => { root.zal-toggle-feed(i); }
                 set-default-feed(i) => { root.zal-set-default-feed(i); }
                 close-day-modal => { root.zal-close-day-modal(); }
-                open-create-event(k, m) => { root.zal-open-create-event(k, m); }
+                open-create-event(k, m, all-day) => { root.zal-open-create-event(k, m, all-day); }
                 close-create-event => { root.zal-close-create-event(); }
                 create-set-title(t) => { root.zal-create-set-title(t); }
+                create-set-location(t) => { root.zal-create-set-location(t); }
+                create-set-description(t) => { root.zal-create-set-description(t); }
+                create-shift-date(d) => { root.zal-create-shift-date(d); }
+                create-open-repeat => { root.zal-create-open-repeat(); }
+                create-close-repeat => { root.zal-create-close-repeat(); }
+                create-clear-repeat => { root.zal-create-clear-repeat(); }
+                create-set-repeat-interval(n) => { root.zal-create-set-repeat-interval(n); }
+                create-set-repeat-unit(n) => { root.zal-create-set-repeat-unit(n); }
+                create-set-repeat-end(n) => { root.zal-create-set-repeat-end(n); }
+                create-shift-until(d) => { root.zal-create-shift-until(d); }
+                create-set-repeat-count(n) => { root.zal-create-set-repeat-count(n); }
+                create-toggle-weekday(i) => { root.zal-create-toggle-weekday(i); }
+                create-set-by-weekday(v) => { root.zal-create-set-by-weekday(v); }
                 create-set-all-day(v) => { root.zal-create-set-all-day(v); }
                 create-set-start-mins(m) => { root.zal-create-set-start-mins(m); }
                 create-set-end-mins(m) => { root.zal-create-set-end-mins(m); }
@@ -435,7 +516,9 @@ export component AppWindow inherits Window {
                 datetime-options: root.datetime-options;
                 font-family: root.font-family;
                 font-family-options: root.font-family-options;
+                font-family-faces: root.font-family-faces;
                 font-scale: root.font-scale;
+                event-font-scale: root.event-font-scale;
                 font-scale-options: root.font-scale-options;
                 modal-show-time: root.modal-show-time;
                 modal-show-title: root.modal-show-title;
@@ -447,6 +530,7 @@ export component AppWindow inherits Window {
                 new-field-name <=> root.new-field-name;
                 new-field-type: root.new-field-type;
                 field-type-options: root.field-type-options;
+                new-field-options: root.new-field-options;
                 help-text: root.help-text;
                 perf-overlay: root.perf-overlay;
                 current-version: root.current-version;
@@ -487,6 +571,7 @@ export component AppWindow inherits Window {
                 set-datetime-format(i) => { root.settings-set-datetime-format(i); }
                 set-font-family(i) => { root.settings-set-font-family(i); }
                 set-font-scale(i) => { root.settings-set-font-scale(i); }
+                set-event-font-scale(i) => { root.settings-set-event-font-scale(i); }
                 set-modal-show-time(v) => { root.settings-set-modal-show-time(v); }
                 set-modal-show-title(v) => { root.settings-set-modal-show-title(v); }
                 set-modal-show-calendar(v) => { root.settings-set-modal-show-calendar(v); }
@@ -496,6 +581,9 @@ export component AppWindow inherits Window {
                 add-custom-field => { root.settings-add-custom-field(); }
                 remove-custom-field(i) => { root.settings-remove-custom-field(i); }
                 set-new-field-type(i) => { root.settings-set-new-field-type(i); }
+                set-new-field-option(i, text) => { root.settings-set-new-field-option(i, text); }
+                add-field-option => { root.settings-add-field-option(); }
+                remove-field-option(i) => { root.settings-remove-field-option(i); }
                 run-setup-again => { root.run-setup-again(); }
                 quit-app => { root.quit-app(); }
                 check-updates => { root.check-updates(); }
@@ -538,6 +626,7 @@ export component AppWindow inherits Window {
                                 padding-left: 14px;
                                 padding-right: 14px;
                                 Text {
+                                    font-family: Theme.font-family;
                                     text: label;
                                     color: Theme.text;
                                     font-size: Theme.font-body;

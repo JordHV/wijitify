@@ -40,6 +40,7 @@ export component SetupFlow inherits Rectangle {
         spacing: Theme.pad;
 
         Text {
+            font-family: Theme.font-family;
             text: step == 0 ? "Choose modules" : "Zalender setup";
             color: Theme.text;
             font-size: Theme.font-title;
@@ -64,6 +65,7 @@ export component SetupFlow inherits Rectangle {
                 text <=> root.zalender-timezone;
             }
             Text {
+                font-family: Theme.font-family;
                 text: "Calendar feeds";
                 color: Theme.muted;
                 font-size: Theme.font-caption;

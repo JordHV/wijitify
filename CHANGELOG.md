@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-25
+
+### Added
+
+- Bundled UI fonts (Nunito, Libre Baskerville, IBM Plex Mono, Playfair Display, Oswald, Caveat, Bungee) so the font choice looks the same on every device
+- Separate event font size for calendar titles and times (config schema 8; existing font size is copied onto events)
+- Repeating local events: day, week, month, quarter, or year, ending never, on a date, or after a count
+- Event location on local events and from ICS feeds
+
 ## [0.3.2] - 2026-10-24
 
 ### Fixed

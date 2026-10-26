@@ -111,6 +111,8 @@ pub fn new_local_event(
         feed_name: feed_name.into(),
         color: color.into(),
         description: String::new(),
+        location: String::new(),
+        rrule: None,
     }
 }
 

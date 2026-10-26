@@ -19,6 +19,11 @@ pub struct CalEvent {
     pub color: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub location: String,
+    /// Series rule for a stored local event. Occurrences leave this empty.
+    #[serde(default)]
+    pub rrule: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +170,8 @@ mod tests {
             feed_name: "Work".into(),
             color: "#3b82f6".into(),
             description: String::new(),
+            location: String::new(),
+            rrule: None,
         };
         assert_eq!(e.uid, "abc");
         assert!(e.recurrence_id.is_some());
@@ -189,6 +196,8 @@ mod tests {
             feed_name: "f".into(),
             color: "#000".into(),
             description: String::new(),
+            location: String::new(),
+            rrule: None,
         };
         let all_day = CalEvent {
             uid: "a".into(),
@@ -205,6 +214,8 @@ mod tests {
             feed_name: "f".into(),
             color: "#000".into(),
             description: String::new(),
+            location: String::new(),
+            rrule: None,
         };
         // Insert timed first so index order alone would put it first.
         let snap = CalendarSnapshot::from_events(vec![timed, all_day], day, day);

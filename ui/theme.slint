@@ -29,15 +29,21 @@ export global Theme {
     out property <length> pad-sm: 8px;
     out property <length> radius: 8px;
 
-    /// Empty = platform default. Applied via Window.default-font-family.
+    /// Empty = platform default. Window.default-font-family and each Text.font-family bind here.
     in-out property <string> font-family: "";
-    /// Scales all Theme font tokens (Settings → Global).
+    /// App font size: shell, settings, and calendar chrome. Not event chip text.
     in-out property <float> font-scale: 1.0;
+    /// Event titles and times on the calendar main view.
+    in-out property <float> event-font-scale: 1.0;
     out property <length> font-title: 28px * font-scale;
     out property <length> font-body: 18px * font-scale;
     out property <length> font-caption: 14px * font-scale;
     out property <length> font-clock: 28px * font-scale;
-    out property <length> font-event: 15px * font-scale;
+    out property <length> font-event: 15px * event-font-scale;
+    /// Month and packed timed chips. Smaller than font-event, same event scale.
+    out property <length> font-event-compact: 11px * event-font-scale;
+    out property <length> font-event-time: 14px * event-font-scale;
+    out property <length> font-event-time-compact: 9px * event-font-scale;
 
     /// Dashboard preset pill. Name field is the label area inside it (padding, gap, chevron).
     out property <length> preset-pill-width: font-body * 12;

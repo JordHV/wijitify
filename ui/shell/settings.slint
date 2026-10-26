@@ -29,6 +29,27 @@ export struct SettingsFieldDefRow {
     type-label: string,
 }
 
+/// Choice draft. Keeps what was typed when the options list refreshes.
+component FieldOptionInput inherits HorizontalLayout {
+    in property <string> value: "";
+    in property <int> index: 0;
+    callback commit(int, string);
+
+    property <string> draft: root.value;
+    changed value => { root.draft = root.value; }
+
+    spacing: Theme.pad-sm;
+    alignment: center;
+    cross-axis-alignment: center;
+
+    ShortInput {
+        box-width: 200px;
+        text <=> root.draft;
+        edited => { root.commit(root.index, root.draft); }
+    }
+    @children
+}
+
 export struct ThemeColorRow {
     id: string,
     label: string,
@@ -64,60 +85,34 @@ component PresetCol inherits HorizontalLayout {
     @children
 }
 
-/// Collapsed: name · visible · type · remove. Expand to edit name, URL, and color.
-component CalendarFeedCard inherits Rectangle {
+/// Summary row. The whole row opens the edit modal.
+component CalendarFeedRow inherits TouchArea {
     in property <string> name: "";
-    in property <string> url: "";
-    in property <string> color-hex: "#3b82f6";
     in property <color> feed-color: Theme.accent;
     in property <bool> feed-visible: true;
     in property <bool> writable: false;
     in property <bool> local: false;
-    in-out property <bool> expanded: false;
+    callback edit();
 
-    // Drafts follow the feed until the user types, then stay put until the next save.
-    property <string> draft-name: root.name;
-    property <string> draft-url: root.url;
-    property <string> draft-color: root.color-hex;
-    changed name => { root.draft-name = root.name; }
-    changed url => { root.draft-url = root.url; }
-    changed color-hex => { root.draft-color = root.color-hex; }
+    horizontal-stretch: 1;
+    min-height: Theme.touch-min;
+    clicked => { root.edit(); }
 
-    callback toggle-visible();
-    callback remove();
-    callback commit(string, string, string);
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: root.pressed ? Theme.surface-press : Theme.surface;
+        border-radius: Theme.radius;
+        border-width: 1px;
+        border-color: Theme.surface-press;
 
-    function save() {
-        root.commit(root.draft-name, root.draft-url, root.draft-color);
-    }
-
-    background: Theme.surface;
-    border-radius: Theme.radius;
-    border-width: 1px;
-    border-color: Theme.surface-press;
-
-    VerticalLayout {
-        padding: Theme.pad-sm;
-        spacing: Theme.pad-sm;
-
-        // Summary row
         HorizontalLayout {
+            padding-left: Theme.pad-sm;
+            padding-right: Theme.pad;
             spacing: Theme.pad-sm;
             alignment: stretch;
             cross-axis-alignment: center;
 
-            TouchArea {
-                width: Theme.touch-min;
-                height: Theme.touch-min;
-                clicked => { root.expanded = !root.expanded; }
-                FaIcon {
-                    glyph: root.expanded ? Icons.chevron-down : Icons.chevron-right;
-                    size: 14px;
-                    tone: Theme.muted;
-                    width: 100%;
-                    height: 100%;
-                }
-            }
             Rectangle {
                 width: 18px;
                 height: 18px;
@@ -127,6 +122,7 @@ component CalendarFeedCard inherits Rectangle {
                 border-color: Theme.surface-press;
             }
             Text {
+                font-family: Theme.font-family;
                 text: root.name;
                 color: Theme.text;
                 font-size: Theme.font-body;
@@ -135,167 +131,180 @@ component CalendarFeedCard inherits Rectangle {
                 horizontal-alignment: left;
                 horizontal-stretch: 1;
                 overflow: elide;
-            }
-            Switch {
-                checked: root.feed-visible;
-                tip: "When off, this calendar’s events are hidden from all views without removing the feed.";
-                toggled => { root.toggle-visible(); }
+                opacity: root.feed-visible ? 1 : 0.45;
             }
             Text {
-                text: root.local ? "Local" : (root.writable ? "Writable" : "ICS");
+                font-family: Theme.font-family;
+                text: (root.local ? "Local" : (root.writable ? "Writable" : "ICS"))
+                    + (root.feed-visible ? "" : " · hidden");
                 color: Theme.muted;
                 font-size: Theme.font-caption;
                 vertical-alignment: center;
-                min-width: 72px;
-            }
-            if !root.local: Button {
-                label: "Remove";
-                role: "danger";
-                activate => { root.remove(); }
-            }
-        }
-
-        if root.expanded: VerticalLayout {
-            spacing: Theme.pad-sm;
-            Rectangle { height: 1px; background: Theme.surface-2; }
-            SettingRow {
-                label: "Name";
-                tip: root.local
-                    ? "Name of your on-device calendar. Used when creating events. Not shared."
-                    : "Display name in the sidebar and on events. Applies when you leave the field.";
-                ShortInput {
-                    box-width: 240px;
-                    text <=> root.draft-name;
-                    edited => { root.save(); }
-                }
-            }
-            if !root.local: SettingRow {
-                label: "ICS URL";
-                tip: "Public HTTPS link. A new address is refreshed in the background after you leave the field.";
-                ShortInput {
-                    box-width: 420px;
-                    text <=> root.draft-url;
-                    edited => { root.save(); }
-                }
-            }
-            SettingRow {
-                label: "Color";
-                tip: "Color for this calendar’s events and sidebar checkbox.";
-                ColorBox {
-                    value: root.feed-color;
-                    picked(hex) => {
-                        root.draft-color = hex;
-                        root.save();
-                    }
-                }
-            }
-            Text {
-                text: root.local
-                    ? "Local calendar — on this device only. Cannot be shared or removed. Pick Default in the sidebar to choose where new events are created."
-                    : (root.writable
-                        ? "Writable source — Edit is available on events when supported."
-                        : "Read-only ICS — per-event Customize still overrides this color.");
-                color: Theme.muted;
-                font-size: Theme.font-caption;
-                wrap: word-wrap;
-                            min-width: 0px;
-                horizontal-alignment: left;
             }
         }
     }
 }
 
-/// Blank add row: expand to enter name / URL / color; blue Add instead of Remove.
-component CalendarAddCard inherits Rectangle {
-    in-out property <string> new-name: "";
-    in-out property <string> new-url: "";
-    in-out property <string> new-color: "#3b82f6";
-    in-out property <bool> expanded: false;
+/// Add or edit a calendar. Drafts stay local until Save / Add.
+component CalendarFormModal inherits TouchArea {
+    in property <string> title: "Calendar";
+    in property <string> save-label: "Save";
+    in property <bool> show-url: true;
+    in property <bool> show-visible: false;
+    in property <bool> visible-checked: true;
+    in property <bool> show-remove: false;
+    in property <string> note: "";
+    in property <bool> show-error: false;
+    in property <string> error: "";
+    in-out property <string> draft-name: "";
+    in-out property <string> draft-url: "";
+    in-out property <color> swatch: #3b82f6;
+    callback color-picked(string);
+    callback toggle-visible();
+    callback save();
+    callback remove();
+    callback dismiss();
 
-    callback add();
+    width: 100%;
+    height: 100%;
+    z: 40;
+    clicked => { root.dismiss(); }
 
-    background: Theme.surface;
-    border-radius: Theme.radius;
-    border-width: 1px;
-    border-color: Theme.surface-press;
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Theme.dim;
+    }
 
-    VerticalLayout {
-        padding: Theme.pad-sm;
-        spacing: Theme.pad-sm;
+    TouchArea {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(560px, parent.width - 48px);
+        height: min(480px, parent.height - 48px);
+        clicked => { }
 
-        HorizontalLayout {
-            spacing: Theme.pad-sm;
-            alignment: stretch;
-            cross-axis-alignment: center;
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Theme.bg;
+            border-radius: Theme.radius;
+            border-width: 1px;
+            border-color: Theme.stroke;
 
-            TouchArea {
-                width: Theme.touch-min;
-                height: Theme.touch-min;
-                clicked => { root.expanded = !root.expanded; }
-                FaIcon {
-                    glyph: root.expanded ? Icons.chevron-down : Icons.chevron-right;
-                    size: 14px;
-                    tone: Theme.muted;
+            VerticalLayout {
+                width: 100%;
+                height: 100%;
+                padding: Theme.pad;
+                spacing: Theme.pad-sm;
+
+                HorizontalLayout {
                     width: 100%;
-                    height: 100%;
+                    spacing: Theme.pad-sm;
+                    alignment: stretch;
+                    cross-axis-alignment: center;
+                    Text {
+                        font-family: Theme.font-family;
+                        text: root.title;
+                        color: Theme.text;
+                        font-size: Theme.font-title;
+                        font-weight: 700;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    IconButton {
+                        glyph: Icons.xmark;
+                        activate => { root.dismiss(); }
+                    }
                 }
-            }
-            Rectangle {
-                width: 18px;
-                height: 18px;
-                border-radius: 4px;
-                border-width: 1px;
-                border-color: Theme.surface-press;
-                background: transparent;
-            }
-            Text {
-                text: root.new-name == "" ? "New calendar" : root.new-name;
-                color: root.new-name == "" ? Theme.muted : Theme.text;
-                font-size: Theme.font-body;
-                font-weight: 600;
-                font-italic: root.new-name == "";
-                vertical-alignment: center;
-                horizontal-alignment: left;
-                horizontal-stretch: 1;
-                overflow: elide;
-            }
-            // Spacer matching visible switch + type columns on feed rows
-            Rectangle { min-width: 56px; max-width: 56px; height: 1px; }
-            Text {
-                text: "";
-                min-width: 72px;
-            }
-            Button {
-                label: "Add calendar";
-                role: "primary";
-                activate => { root.add(); }
-            }
-        }
 
-        if root.expanded: VerticalLayout {
-            spacing: Theme.pad-sm;
-            Rectangle { height: 1px; background: Theme.surface-2; }
-            SettingRow {
-                label: "Name";
-                tip: "Display name in the sidebar and on events.";
-                ShortInput {
-                    box-width: 240px;
-                    text <=> root.new-name;
+                if root.show-error: Banner {
+                    message: root.error;
+                    kind: 3;
                 }
-            }
-            SettingRow {
-                label: "ICS URL";
-                tip: "Public HTTPS link to an .ics calendar.";
-                ShortInput {
-                    box-width: 420px;
-                    text <=> root.new-url;
+
+                Flickable {
+                    vertical-stretch: 1;
+                    min-height: 0px;
+                    content-width: self.width;
+                    VerticalLayout {
+                        width: parent.width;
+                        spacing: 0;
+                        alignment: start;
+
+                        SettingRow {
+                            label: "Name";
+                            tip: root.show-url
+                                ? "Display name in the sidebar and on events."
+                                : "Name of your on-device calendar. Used when creating events. Not shared.";
+                            ShortInput {
+                                box-width: 240px;
+                                text <=> root.draft-name;
+                            }
+                        }
+                        if root.show-url: SettingsDivider {}
+                        if root.show-url: SettingRow {
+                            label: "ICS URL";
+                            tip: "Public HTTPS link to an .ics calendar. A new address is refreshed in the background after you save.";
+                            ShortInput {
+                                box-width: 420px;
+                                text <=> root.draft-url;
+                            }
+                        }
+                        SettingsDivider {}
+                        SettingRow {
+                            label: "Color";
+                            tip: "Color for this calendar’s events and sidebar checkbox.";
+                            picker := ColorBox {
+                                value: root.swatch;
+                                picked(hex) => {
+                                    root.swatch = picker.shown;
+                                    root.color-picked(hex);
+                                }
+                            }
+                        }
+                        if root.show-visible: SettingsDivider {}
+                        if root.show-visible: SettingRow {
+                            label: "Show events";
+                            tip: "When off, this calendar’s events are hidden from all views without removing the feed.";
+                            Switch {
+                                checked: root.visible-checked;
+                                toggled => { root.toggle-visible(); }
+                            }
+                        }
+                        if root.note != "": Rectangle { height: Theme.pad-sm; }
+                        if root.note != "": Text {
+                            font-family: Theme.font-family;
+                            text: root.note;
+                            color: Theme.muted;
+                            font-size: Theme.font-caption;
+                            wrap: word-wrap;
+                            min-width: 0px;
+                            horizontal-alignment: left;
+                        }
+                    }
                 }
-            }
-            SettingRow {
-                label: "Color";
-                tip: "Color for this calendar’s events and checkbox.";
-                ColorBox {
-                    picked(hex) => { root.new-color = hex; }
+
+                HorizontalLayout {
+                    spacing: Theme.pad-sm;
+                    alignment: stretch;
+                    cross-axis-alignment: center;
+                    if root.show-remove: Button {
+                        label: "Remove";
+                        role: "danger";
+                        activate => { root.remove(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button {
+                        label: "Cancel";
+                        role: "secondary";
+                        activate => { root.dismiss(); }
+                    }
+                    Button {
+                        label: root.save-label;
+                        role: "primary";
+                        activate => { root.save(); }
+                    }
                 }
             }
         }
@@ -354,7 +363,9 @@ export component SettingsOverlay inherits Rectangle {
     in property <[string]> datetime-options;
     in property <int> font-family: 0;
     in property <[string]> font-family-options;
+    in property <[string]> font-family-faces;
     in property <int> font-scale: 1;
+    in property <int> event-font-scale: 1;
     in property <[string]> font-scale-options;
 
     in property <bool> modal-show-time: true;
@@ -368,6 +379,7 @@ export component SettingsOverlay inherits Rectangle {
     in-out property <string> new-field-name: "";
     in property <int> new-field-type: 0;
     in property <[string]> field-type-options;
+    in property <[string]> new-field-options;
 
     in property <string> help-text: "";
 
@@ -416,6 +428,7 @@ export component SettingsOverlay inherits Rectangle {
     callback set-datetime-format(int);
     callback set-font-family(int);
     callback set-font-scale(int);
+    callback set-event-font-scale(int);
     callback set-modal-show-time(bool);
     callback set-modal-show-title(bool);
     callback set-modal-show-calendar(bool);
@@ -425,6 +438,9 @@ export component SettingsOverlay inherits Rectangle {
     callback add-custom-field();
     callback remove-custom-field(int);
     callback set-new-field-type(int);
+    callback set-new-field-option(int, string);
+    callback add-field-option();
+    callback remove-field-option(int);
     callback run-setup-again();
     callback quit-app();
     callback check-updates();
@@ -435,15 +451,93 @@ export component SettingsOverlay inherits Rectangle {
     in-out property <length> body-scroll: 0px;
     /// Edit-preset modal (Preset views).
     property <bool> preset-edit-open: false;
+    property <bool> feed-edit-open: false;
+    property <bool> feed-add-open: false;
+    /// True after Save/Add in this open, so a previous banner is not shown first.
+    property <bool> feed-form-tried: false;
+    property <int> feed-edit-index: -1;
+    property <bool> feed-edit-local: false;
+    property <bool> feed-edit-writable: false;
+    property <bool> feed-edit-visible: true;
+    property <string> feed-draft-name: "";
+    property <string> feed-draft-url: "";
+    property <string> feed-draft-color: "#3b82f6";
+    property <color> feed-edit-swatch: #3b82f6;
+    property <color> feed-add-swatch: #3b82f6;
+    property <int> feed-add-count: 0;
     changed page => {
         root.body-scroll = 0px;
         root.preset-edit-open = false;
+        root.close-feed-modals();
     }
 
     function go-page(i: int) {
         root.body-scroll = 0px;
         root.preset-edit-open = false;
+        root.close-feed-modals();
         root.select-page(i);
+    }
+
+    function close-feed-modals() {
+        root.feed-edit-open = false;
+        root.feed-add-open = false;
+        root.feed-form-tried = false;
+    }
+
+    function open-feed-edit(i: int) {
+        if i < 0 || i >= root.feeds.length {
+            return;
+        }
+        root.feed-edit-index = i;
+        root.feed-edit-local = root.feeds[i].local;
+        root.feed-edit-writable = root.feeds[i].writable;
+        root.feed-edit-visible = root.feeds[i].visible;
+        root.feed-draft-name = root.feeds[i].name;
+        root.feed-draft-url = root.feeds[i].url;
+        root.feed-draft-color = root.feeds[i].color-hex;
+        root.feed-edit-swatch = root.feeds[i].color;
+        root.feed-form-tried = false;
+        root.feed-add-open = false;
+        root.feed-edit-open = true;
+    }
+
+    function open-feed-add() {
+        root.new-feed-name = "";
+        root.new-feed-url = "";
+        root.new-feed-color = "#3b82f6";
+        root.feed-add-swatch = #3b82f6;
+        root.feed-form-tried = false;
+        root.feed-edit-open = false;
+        root.feed-add-open = true;
+    }
+
+    function save-feed-edit() {
+        root.update-feed(root.feed-edit-index, root.feed-draft-name, root.feed-draft-url, root.feed-draft-color);
+        if root.feed-banner == "" {
+            root.close-feed-modals();
+        } else {
+            root.feed-form-tried = true;
+        }
+    }
+
+    function save-feed-add() {
+        root.feed-add-count = root.feeds.length;
+        root.add-feed();
+        if root.feeds.length > root.feed-add-count {
+            root.close-feed-modals();
+        } else {
+            root.feed-form-tried = true;
+        }
+    }
+
+    function toggle-editing-visible() {
+        root.feed-edit-visible = !root.feed-edit-visible;
+        root.toggle-feed-visible(root.feed-edit-index);
+    }
+
+    function remove-editing-feed() {
+        root.remove-feed(root.feed-edit-index);
+        root.close-feed-modals();
     }
 
     function open-preset-edit(i: int) {
@@ -463,7 +557,7 @@ export component SettingsOverlay inherits Rectangle {
         Rectangle {
             width: 100%;
             height: 100%;
-            background: Theme.dim;
+            background: (root.preset-edit-open || root.feed-edit-open || root.feed-add-open) ? transparent : Theme.dim;
         }
     }
 
@@ -484,6 +578,7 @@ export component SettingsOverlay inherits Rectangle {
             spacing: Theme.pad-sm;
 
             Text {
+                font-family: Theme.font-family;
                 text: page < page-names.length ? page-names[page] : "Settings";
                 color: Theme.text;
                 font-size: Theme.font-title;
@@ -508,6 +603,7 @@ export component SettingsOverlay inherits Rectangle {
                         label: "Version";
                         tip: "Installed app version. On Linux Flatpak, Check now looks for updates from the release feed.";
                         Text {
+                            font-family: Theme.font-family;
                             text: "Wijitify " + (root.current-version == "" ? "…" : root.current-version);
                             color: Theme.text;
                             font-size: Theme.font-body;
@@ -537,6 +633,7 @@ export component SettingsOverlay inherits Rectangle {
                                     kind: 1;
                                 }
                                 if update-notes != "": Text {
+                                    font-family: Theme.font-family;
                                     text: root.update-notes;
                                     color: Theme.muted;
                                     font-size: Theme.font-caption;
@@ -634,34 +731,32 @@ export component SettingsOverlay inherits Rectangle {
                     spacing: Theme.pad;
                     alignment: start;
 
-                    // Calendars — collapsed rows; expand for details; blank add row at bottom
+                    // Calendars — a row opens the editor; Add calendar is below the list.
                     if page == 0: VerticalLayout {
                         spacing: Theme.pad-sm;
                         alignment: start;
 
-                        Banner {
+                        if !root.feed-edit-open && !root.feed-add-open: Banner {
                             message: root.feed-banner;
                             kind: root.feed-banner-kind;
                         }
 
-                        for f[i] in feeds: CalendarFeedCard {
+                        for f[i] in feeds: CalendarFeedRow {
                             name: f.name;
-                            url: f.url;
-                            color-hex: f.color-hex;
                             feed-color: f.color;
                             feed-visible: f.visible;
                             writable: f.writable;
                             local: f.local;
-                            toggle-visible => { root.toggle-feed-visible(i); }
-                            remove => { root.remove-feed(i); }
-                            commit(name, url, color) => { root.update-feed(i, name, url, color); }
+                            edit => { root.open-feed-edit(i); }
                         }
 
-                        CalendarAddCard {
-                            new-name <=> root.new-feed-name;
-                            new-url <=> root.new-feed-url;
-                            new-color <=> root.new-feed-color;
-                            add => { root.add-feed(); }
+                        HorizontalLayout {
+                            alignment: start;
+                            Button {
+                                label: "Add calendar";
+                                role: "primary";
+                                activate => { root.open-feed-add(); }
+                            }
                         }
                     }
 
@@ -670,6 +765,7 @@ export component SettingsOverlay inherits Rectangle {
                         spacing: Theme.pad-sm;
                         alignment: start;
                         Text {
+                            font-family: Theme.font-family;
                             text: "Applies across the shell and every module view.";
                             color: Theme.muted;
                             font-size: Theme.font-caption;
@@ -682,19 +778,29 @@ export component SettingsOverlay inherits Rectangle {
                             Dropdown {
                                 inline: true;
                                 caption: "Font";
-                                tip: "Typeface used for dashboard text. System default uses the OS UI font.";
+                                tip: "Typeface for the whole app. Each row is drawn in that face. System default uses the OS UI font.";
                                 options: root.font-family-options;
+                                option-fonts: root.font-family-faces;
                                 selected: root.font-family;
                                 changed(i) => { root.set-font-family(i); }
                             }
                             SettingsDivider {}
                             Dropdown {
                                 inline: true;
-                                caption: "Font size";
-                                tip: "Scales titles, body text, captions, clock, and event chips together.";
+                                caption: "App font size";
+                                tip: "Shell, settings, day headers, hour labels, and popups. Event text on the calendar stays on Event font size.";
                                 options: root.font-scale-options;
                                 selected: root.font-scale;
                                 changed(i) => { root.set-font-scale(i); }
+                            }
+                            SettingsDivider {}
+                            Dropdown {
+                                inline: true;
+                                caption: "Event font size";
+                                tip: "Event titles and times on the day, week, month, year, and agenda views.";
+                                options: root.font-scale-options;
+                                selected: root.event-font-scale;
+                                changed(i) => { root.set-event-font-scale(i); }
                             }
                             SettingsDivider {}
                             Dropdown {
@@ -775,12 +881,14 @@ export component SettingsOverlay inherits Rectangle {
                             kind: root.theme-banner-kind;
                         }
                         Text {
+                            font-family: Theme.font-family;
                             text: "Component colors";
                             color: Theme.text;
                             font-size: Theme.font-body;
                             font-weight: 600;
                         }
                         Text {
+                            font-family: Theme.font-family;
                             text: "Defaults come from the selected theme. Tap a color box to choose another.";
                             color: Theme.muted;
                             font-size: Theme.font-caption;
@@ -810,6 +918,7 @@ export component SettingsOverlay inherits Rectangle {
                     if page == 3: VerticalLayout {
                         spacing: Theme.pad-sm;
                         Text {
+                            font-family: Theme.font-family;
                             text: "Built-in and custom views. Default is the dashboard Default button (today + that preset). Show puts a preset in the view pill. Edit opens that preset’s options.";
                             color: Theme.muted;
                             font-size: Theme.font-caption;
@@ -826,6 +935,7 @@ export component SettingsOverlay inherits Rectangle {
                                 alignment: stretch;
                                 cross-axis-alignment: center;
                                 Text {
+                                    font-family: Theme.font-family;
                                     text: "Preset";
                                     color: Theme.muted;
                                     font-size: Theme.font-caption;
@@ -835,6 +945,7 @@ export component SettingsOverlay inherits Rectangle {
                                 }
                                 PresetCol {
                                     Text {
+                                        font-family: Theme.font-family;
                                         text: "Default";
                                         color: Theme.muted;
                                         font-size: Theme.font-caption;
@@ -843,6 +954,7 @@ export component SettingsOverlay inherits Rectangle {
                                 }
                                 PresetCol {
                                     Text {
+                                        font-family: Theme.font-family;
                                         text: "Show";
                                         color: Theme.muted;
                                         font-size: Theme.font-caption;
@@ -880,6 +992,7 @@ export component SettingsOverlay inherits Rectangle {
                                             alignment: start;
                                             cross-axis-alignment: center;
                                             Text {
+                                                font-family: Theme.font-family;
                                                 text: p.name + (p.is-hot ? "  · default" : "");
                                                 color: Theme.text;
                                                 font-size: Theme.font-body;
@@ -890,6 +1003,7 @@ export component SettingsOverlay inherits Rectangle {
                                                 overflow: elide;
                                             }
                                             Text {
+                                                font-family: Theme.font-family;
                                                 text: p.summary;
                                                 color: Theme.muted;
                                                 font-size: Theme.font-caption;
@@ -962,6 +1076,7 @@ export component SettingsOverlay inherits Rectangle {
                     if page == 4: VerticalLayout {
                         spacing: Theme.pad-sm;
                         Text {
+                            font-family: Theme.font-family;
                             text: "Fields shown when you open a day or event from the calendar.";
                             color: Theme.muted;
                             font-size: Theme.font-caption;
@@ -1017,6 +1132,7 @@ export component SettingsOverlay inherits Rectangle {
                             alignment: stretch;
                             cross-axis-alignment: center;
                             Text {
+                                font-family: Theme.font-family;
                                 text: "Definitions only. Values are set per event in Customize.";
                                 color: Theme.muted;
                                 font-size: Theme.font-caption;
@@ -1044,6 +1160,7 @@ export component SettingsOverlay inherits Rectangle {
                                         alignment: center;
                                         cross-axis-alignment: center;
                                         Text {
+                                            font-family: Theme.font-family;
                                             text: f.type-label;
                                             color: Theme.text;
                                             font-size: Theme.font-caption;
@@ -1070,15 +1187,60 @@ export component SettingsOverlay inherits Rectangle {
                             Dropdown {
                                 inline: true;
                                 caption: "Type";
-                                tip: "Input control used when editing this field on an event: short text, long text, boolean, or choice list.";
+                                tip: "Short text is one row, long text is three lines, yes/no is a switch, and choice is a dropdown.";
                                 options: root.field-type-options;
                                 selected: root.new-field-type;
                                 changed(i) => { root.set-new-field-type(i); }
                             }
+                            if root.new-field-type == 3: VerticalLayout {
+                                spacing: 0;
+                                width: 100%;
+                                SettingsDivider {}
+                                SettingRow {
+                                    label: "Choices";
+                                    tip: "More than one choice is required. A choice can be left blank.";
+                                    Text {
+                                        font-family: Theme.font-family;
+                                        text: root.new-field-options.length + " choices";
+                                        color: Theme.muted;
+                                        font-size: Theme.font-caption;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                for opt[i] in root.new-field-options: VerticalLayout {
+                                    spacing: 0;
+                                    width: 100%;
+                                    SettingsDivider {}
+                                    SettingRow {
+                                        label: "Choice " + (i + 1);
+                                        tip: "Shown in the Customize dropdown. Leave empty for a blank choice.";
+                                        FieldOptionInput {
+                                            value: opt;
+                                            index: i;
+                                            commit(n, text) => { root.set-new-field-option(n, text); }
+                                            if root.new-field-options.length > 2: Button {
+                                                label: "Remove";
+                                                role: "danger";
+                                                activate => { root.remove-field-option(i); }
+                                            }
+                                        }
+                                    }
+                                }
+                                SettingsDivider {}
+                                SettingRow {
+                                    label: "Add choice";
+                                    tip: "Add another choice to this field.";
+                                    Button {
+                                        label: "Add choice";
+                                        role: "secondary";
+                                        activate => { root.add-field-option(); }
+                                    }
+                                }
+                            }
                             SettingsDivider {}
                             SettingRow {
                                 label: "Add field";
-                                tip: "Adds the field definition to config. It appears in Customize for every event after you save.";
+                                tip: "Adds the field definition to config. It appears in Customize for every event after you save. Choice fields need more than one choice.";
                                 Button {
                                     label: "Add field";
                                     role: "primary";
@@ -1096,6 +1258,7 @@ export component SettingsOverlay inherits Rectangle {
                             alignment: stretch;
                             cross-axis-alignment: center;
                             Text {
+                                font-family: Theme.font-family;
                                 text: "ICS feeds are read-only. The Edit button on events stays off until a writable calendar source is connected.";
                                 color: Theme.text;
                                 font-size: Theme.font-body;
@@ -1118,6 +1281,7 @@ export component SettingsOverlay inherits Rectangle {
                             alignment: stretch;
                             cross-axis-alignment: center;
                             Text {
+                                font-family: Theme.font-family;
                                 text: root.help-text;
                                 color: Theme.text;
                                 font-size: Theme.font-body;
@@ -1137,6 +1301,7 @@ export component SettingsOverlay inherits Rectangle {
                         spacing: Theme.pad;
                         alignment: start;
                         Text {
+                            font-family: Theme.font-family;
                             text: "Wijitify is an open-source, full-screen dashboard for a dedicated Linux touchscreen. The app is a shell that hosts modules. Zalender is the calendar: public ICS feeds, day through year views, and an offline cache so the board still works without a network.";
                             color: Theme.text;
                             font-size: Theme.font-body;
@@ -1145,6 +1310,7 @@ export component SettingsOverlay inherits Rectangle {
                             horizontal-alignment: left;
                         }
                         Text {
+                            font-family: Theme.font-family;
                             text: "It is built as a modular monolith: one native app, shared settings, and modules you can turn on or off. Touch targets stay large, and the screen you are looking at is drawn from memory while feeds refresh in the background.";
                             color: Theme.text;
                             font-size: Theme.font-body;
@@ -1153,6 +1319,7 @@ export component SettingsOverlay inherits Rectangle {
                             horizontal-alignment: left;
                         }
                         Text {
+                            font-family: Theme.font-family;
                             text: "Source, issues, and releases:\nhttps://github.com/JordHV/wijitify";
                             color: Theme.text;
                             font-size: Theme.font-body;
@@ -1161,6 +1328,7 @@ export component SettingsOverlay inherits Rectangle {
                             horizontal-alignment: left;
                         }
                         Text {
+                            font-family: Theme.font-family;
                             text: "GPL-3.0-or-later";
                             color: Theme.muted;
                             font-size: Theme.font-caption;
@@ -1192,6 +1360,7 @@ export component SettingsOverlay inherits Rectangle {
                 alignment: space-between;
                 cross-axis-alignment: center;
                 Text {
+                    font-family: Theme.font-family;
                     text: "Settings";
                     color: Theme.text;
                     font-size: Theme.font-body;
@@ -1244,6 +1413,7 @@ export component SettingsOverlay inherits Rectangle {
                                     horizontal-stretch: 0;
                                 }
                                 Text {
+                                    font-family: Theme.font-family;
                                     text: id < root.page-names.length ? root.page-names[id] : "";
                                     color: id == root.page ? Theme.text-on-accent : Theme.text;
                                     font-size: Theme.font-caption;
@@ -1297,6 +1467,7 @@ export component SettingsOverlay inherits Rectangle {
                         alignment: stretch;
                         cross-axis-alignment: center;
                         Text {
+                            font-family: Theme.font-family;
                             text: "Edit " + root.preset-name;
                             color: Theme.text;
                             font-size: Theme.font-title;
@@ -1320,6 +1491,16 @@ export component SettingsOverlay inherits Rectangle {
                             spacing: 0;
                             alignment: start;
 
+                            if preset-is-builtin: SettingRow {
+                                label: "Reset";
+                                tip: "Restores this standard view to its original options. Show and Default stay as they are.";
+                                Button {
+                                    label: "Reset";
+                                    role: "secondary";
+                                    activate => { root.reset-preset(root.preset-index); }
+                                }
+                            }
+                            if preset-is-builtin: SettingsDivider {}
                             if !preset-is-builtin: SettingRow {
                                 label: "Name";
                                 tip: "Label on the dashboard preset button. The box is the width of that button’s name, so the dropdown arrow stays visible.";
@@ -1343,6 +1524,7 @@ export component SettingsOverlay inherits Rectangle {
                                 label: "View";
                                 tip: "Built-in preset. The view unit stays fixed.";
                                 Text {
+                                    font-family: Theme.font-family;
                                     text: root.preset-unit == 0 ? "Day"
                                         : root.preset-unit == 1 ? "Week"
                                         : root.preset-unit == 2 ? "Month"
@@ -1421,6 +1603,7 @@ export component SettingsOverlay inherits Rectangle {
                                                 }
                                             }
                                             Text {
+                                                font-family: Theme.font-family;
                                                 text: d.label;
                                                 color: Theme.text;
                                                 font-size: Theme.font-caption;
@@ -1498,5 +1681,46 @@ export component SettingsOverlay inherits Rectangle {
                 }
             }
         }
+    }
+
+    if root.feed-edit-open: CalendarFormModal {
+        title: "Edit calendar";
+        save-label: "Save";
+        show-url: !root.feed-edit-local;
+        show-visible: true;
+        visible-checked: root.feed-edit-visible;
+        show-remove: !root.feed-edit-local;
+        note: root.feed-edit-local
+            ? "Local calendar — on this device only. Cannot be shared or removed. Pick Default in the sidebar to choose where new events are created."
+            : (root.feed-edit-writable
+                ? "Writable source — Edit is available on events when supported."
+                : "Read-only ICS — per-event Customize still overrides this color.");
+        show-error: root.feed-form-tried && root.feed-banner != "";
+        error: root.feed-banner;
+        draft-name <=> root.feed-draft-name;
+        draft-url <=> root.feed-draft-url;
+        swatch <=> root.feed-edit-swatch;
+        color-picked(hex) => { root.feed-draft-color = hex; }
+        toggle-visible => { root.toggle-editing-visible(); }
+        save => { root.save-feed-edit(); }
+        remove => { root.remove-editing-feed(); }
+        dismiss => { root.close-feed-modals(); }
+    }
+
+    if root.feed-add-open: CalendarFormModal {
+        title: "Add calendar";
+        save-label: "Add";
+        show-url: true;
+        show-visible: false;
+        show-remove: false;
+        note: "Read-only ICS feed. Events appear after the link is saved and refreshed.";
+        show-error: root.feed-form-tried && root.feed-banner != "";
+        error: root.feed-banner;
+        draft-name <=> root.new-feed-name;
+        draft-url <=> root.new-feed-url;
+        swatch <=> root.feed-add-swatch;
+        color-picked(hex) => { root.new-feed-color = hex; }
+        save => { root.save-feed-add(); }
+        dismiss => { root.close-feed-modals(); }
     }
 }

@@ -13,6 +13,7 @@ use crate::modules::zalender::{
     local_events::{self, LocalEventStore, LOCAL_FEED_ID},
     model as zal_model,
     overrides::{self, EventOverride, OverrideKey, OverrideStore},
+    recur::{self, RepeatDraft},
     view as zal_view, CalendarSnapshot,
 };
 use crate::modules::{registry, Module, ModuleContext};
@@ -39,11 +40,11 @@ Day and Week show an all-day row plus timed events with a red now-line on today.
 Navigation\n\
 Arrows move by one unit of the current grain (Agenda steps by its week count). A month that starts on this week steps by its week count; otherwise arrows move one month. Tapping the period title zooms out one level. The view pill switches among visible presets.\n\n\
 Display\n\
-Settings → Global: font, font size, date/time format, week start, dim past days, and shade weekends. Settings → Calendar display toggles day-popup fields.\n\n\
+Settings → Global: font, app font size, event font size, date/time format, week start, dim past days, and shade weekends. App font size covers the shell and calendar labels. Event font size covers event titles and times on the calendar. Settings → Calendar display toggles day-popup fields.\n\n\
 Calendars\n\
 Sidebar checkboxes toggle visibility without refetching. On editable calendars, Default picks the one calendar new events are created on. Manage feeds under Settings → Calendars.\n\n\
 Events\n\
-Day and Week: tap an empty hour to create an event. Month, Year, and Agenda: tap a day for the day modal. Customize stores color, icon, and custom fields locally.\n\n\
+Day and Week: tap an empty hour to create an event, or tap the all-day row for an all-day event. Month, Year, and Agenda: tap a day for the day modal. Customize stores color, icon, and custom fields locally.\n\n\
 About\n\
 What Wijitify is, and the public GitHub repository for source, issues, and releases.\n\n\
 Wijitify\n\
@@ -78,10 +79,25 @@ pub struct AppCtx {
     pub customize_fields: HashMap<String, String>,
     pub name_local_draft: String,
     pub create_title: String,
+    pub create_location: String,
+    pub create_description: String,
     pub create_date_key: String,
     pub create_start_mins: i32,
     pub create_end_mins: i32,
     pub create_all_day: bool,
+    pub create_repeat: bool,
+    pub create_repeat_open: bool,
+    pub create_repeat_interval: i32,
+    /// 0 day, 1 week, 2 month, 3 quarter, 4 year.
+    pub create_repeat_unit: i32,
+    /// 0 never, 1 on a date, 2 after a count.
+    pub create_repeat_end: i32,
+    pub create_repeat_until: String,
+    pub create_repeat_count: i32,
+    /// Sunday = 0 … Saturday = 6.
+    pub create_weekdays: [bool; 7],
+    /// Month and quarter: false = day of month, true = nth weekday.
+    pub create_by_weekday: bool,
     pub settings_new_feed_name: String,
     pub settings_new_feed_url: String,
     pub settings_new_feed_color: String,
@@ -89,6 +105,7 @@ pub struct AppCtx {
     pub settings_feed_banner_kind: i32,
     pub new_field_name: String,
     pub new_field_type: CustomFieldType,
+    pub new_field_options: Vec<String>,
     pub refreshing: bool,
     pub status: String,
     pub status_kind: i32,
@@ -181,10 +198,21 @@ impl AppCtx {
             customize_fields: HashMap::new(),
             name_local_draft: String::new(),
             create_title: String::new(),
+            create_location: String::new(),
+            create_description: String::new(),
             create_date_key: today.format("%Y-%m-%d").to_string(),
             create_start_mins: 9 * 60,
             create_end_mins: 10 * 60,
             create_all_day: false,
+            create_repeat: false,
+            create_repeat_open: false,
+            create_repeat_interval: 1,
+            create_repeat_unit: 0,
+            create_repeat_end: 0,
+            create_repeat_until: today.format("%Y-%m-%d").to_string(),
+            create_repeat_count: 10,
+            create_weekdays: [false; 7],
+            create_by_weekday: false,
             settings_new_feed_name: String::new(),
             settings_new_feed_url: String::new(),
             settings_new_feed_color: "#3b82f6".into(),
@@ -192,6 +220,7 @@ impl AppCtx {
             settings_feed_banner_kind: 0,
             new_field_name: String::new(),
             new_field_type: CustomFieldType::Text,
+            new_field_options: Vec::new(),
             refreshing: false,
             status: String::new(),
             status_kind: 0,
@@ -521,23 +550,24 @@ fn bind_settings(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
         let ctx = ctx.clone();
         ui.on_settings_set_theme_color(move |i, hex| {
             let t0 = Instant::now();
-            {
-                let mut c = ctx.borrow_mut();
-                let labels = ThemePalette::labels();
-                if let Some((key, _)) = labels.get(i as usize) {
-                    let normalized = normalize_hex(&hex);
-                    c.config.palette.set(key, normalized.clone());
-                    if *key == "accent" {
-                        c.config.accent = normalized;
-                    }
-                    c.schedule_config_save();
-                    if let Some(ui) = ui_weak.upgrade() {
-                        apply_theme(&ui, &c.config);
+            let mut c = ctx.borrow_mut();
+            let labels = ThemePalette::labels();
+            let index = i as usize;
+            if let Some((key, label)) = labels.get(index) {
+                let normalized = normalize_hex(&hex);
+                c.config.palette.set(key, normalized.clone());
+                if *key == "accent" {
+                    c.config.accent = normalized.clone();
+                }
+                c.schedule_config_save();
+                if let Some(ui) = ui_weak.upgrade() {
+                    apply_theme(&ui, &c.config);
+                    // Replacing the theme-colors model rebuilds every row and
+                    // closes the picker on the click that chose the color.
+                    if !patch_theme_color(&ui, index, key, label, &normalized) {
+                        apply_settings(&ui, &c);
                     }
                 }
-            }
-            if let Some(ui) = ui_weak.upgrade() {
-                apply_settings(&ui, &ctx.borrow());
             }
             log_cb("settings_set_theme_color", t0);
         });
@@ -670,7 +700,10 @@ fn bind_settings(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                 }
                 let name = c.settings_new_feed_name.trim().to_string();
                 let url = c.settings_new_feed_url.trim().to_string();
-                if !url.is_empty() {
+                if url.is_empty() {
+                    c.settings_feed_banner = "Enter an ICS URL.".into();
+                    c.settings_feed_banner_kind = 3;
+                } else {
                     match zalender::normalize_ics_url(&url) {
                         Ok(url) => {
                             let mut z = c.config.zalender();
@@ -692,11 +725,15 @@ fn bind_settings(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                             c.config.set_zalender(z);
                             c.settings_new_feed_name.clear();
                             c.settings_new_feed_url.clear();
+                            c.settings_new_feed_color = "#3b82f6".into();
+                            c.settings_feed_banner.clear();
+                            c.settings_feed_banner_kind = 0;
                             c.schedule_config_save();
                         }
                         Err(_) => {
-                            c.theme_banner = "URL must start with http:// or https://.".into();
-                            c.theme_banner_kind = 3;
+                            c.settings_feed_banner =
+                                "URL must start with http:// or https://.".into();
+                            c.settings_feed_banner_kind = 3;
                         }
                     }
                 }
@@ -1308,6 +1345,24 @@ fn bind_settings_preset(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<App
     {
         let ui_weak = ui.as_weak();
         let ctx = ctx.clone();
+        ui.on_settings_set_event_font_scale(move |v| {
+            let t0 = Instant::now();
+            {
+                let mut c = ctx.borrow_mut();
+                c.config.event_font_scale = FontScale::from_i32(v);
+                c.schedule_config_save();
+            }
+            if let Some(ui) = ui_weak.upgrade() {
+                let cfg = ctx.borrow().config.clone();
+                apply_theme(&ui, &cfg);
+                apply_settings(&ui, &ctx.borrow());
+            }
+            log_cb("settings_set_event_font_scale", t0);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
         ui.on_settings_set_modal_show_time(move |v| {
             patch_day_modal(&ui_weak, &ctx, |d| d.show_time = v);
         });
@@ -1351,7 +1406,59 @@ fn bind_settings_preset(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<App
         let ui_weak = ui.as_weak();
         let ctx = ctx.clone();
         ui.on_settings_set_new_field_type(move |v| {
-            ctx.borrow_mut().new_field_type = CustomFieldType::from_i32(v);
+            let mut c = ctx.borrow_mut();
+            if let Some(ui) = ui_weak.upgrade() {
+                c.new_field_name = ui.get_new_field_name().to_string();
+            }
+            c.new_field_type = CustomFieldType::from_i32(v);
+            if c.new_field_type == CustomFieldType::Choice {
+                ensure_two_choices(&mut c.new_field_options);
+            }
+            drop(c);
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_settings(&ui, &ctx.borrow());
+            }
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        ui.on_settings_set_new_field_option(move |i, text| {
+            let mut c = ctx.borrow_mut();
+            let i = i as usize;
+            if i < c.new_field_options.len() {
+                // Blank choices are allowed; keep the text as entered.
+                c.new_field_options[i] = text.to_string();
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_settings_add_field_option(move || {
+            let mut c = ctx.borrow_mut();
+            if let Some(ui) = ui_weak.upgrade() {
+                c.new_field_name = ui.get_new_field_name().to_string();
+            }
+            c.new_field_options.push(String::new());
+            drop(c);
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_settings(&ui, &ctx.borrow());
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_settings_remove_field_option(move |i| {
+            let mut c = ctx.borrow_mut();
+            if let Some(ui) = ui_weak.upgrade() {
+                c.new_field_name = ui.get_new_field_name().to_string();
+            }
+            let i = i as usize;
+            if c.new_field_options.len() > 2 && i < c.new_field_options.len() {
+                c.new_field_options.remove(i);
+            }
+            drop(c);
             if let Some(ui) = ui_weak.upgrade() {
                 apply_settings(&ui, &ctx.borrow());
             }
@@ -1368,17 +1475,27 @@ fn bind_settings_preset(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<App
                     c.new_field_name = ui.get_new_field_name().to_string();
                 }
                 let name = c.new_field_name.trim().to_string();
-                if !name.is_empty() {
+                let choice = c.new_field_type == CustomFieldType::Choice;
+                if !name.is_empty() && (!choice || c.new_field_options.len() > 1) {
+                    let options = if choice {
+                        c.new_field_options.clone()
+                    } else {
+                        Vec::new()
+                    };
                     let mut z = c.config.zalender();
                     let id = z.alloc_field_id();
                     z.custom_fields.push(CustomFieldDef {
                         id,
                         name,
                         field_type: c.new_field_type,
-                        options: Vec::new(),
+                        options,
                     });
                     c.config.set_zalender(z);
                     c.new_field_name.clear();
+                    c.new_field_options.clear();
+                    if choice {
+                        ensure_two_choices(&mut c.new_field_options);
+                    }
                     c.schedule_config_save();
                 }
             }
@@ -1593,7 +1710,7 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                     ViewUnit::Day | ViewUnit::Week => {
                         c.anchor = d;
                         let start = c.create_start_mins.max(0);
-                        open_create_event_draft(&mut c, d, start);
+                        open_create_event_draft(&mut c, d, start, false);
                     }
                     ViewUnit::Month | ViewUnit::Year | ViewUnit::Agenda => {
                         // Keep the grid on the month already on screen. Neighboring-month
@@ -1612,7 +1729,7 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
     {
         let ui_weak = ui.as_weak();
         let ctx = ctx.clone();
-        ui.on_zal_open_create_event(move |key, start_mins| {
+        ui.on_zal_open_create_event(move |key, start_mins, all_day| {
             let t0 = Instant::now();
             if let Ok(d) = NaiveDate::parse_from_str(&key, "%Y-%m-%d") {
                 let mut c = ctx.borrow_mut();
@@ -1620,7 +1737,7 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                 c.anchor = d;
                 c.event_detail_open = false;
                 c.day_modal_open = false;
-                open_create_event_draft(&mut c, d, start_mins.max(0));
+                open_create_event_draft(&mut c, d, start_mins.max(0), all_day);
             }
             if let Some(ui) = ui_weak.upgrade() {
                 apply_zalender(&ui, &ctx.borrow());
@@ -1632,9 +1749,11 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
         let ui_weak = ui.as_weak();
         let ctx = ctx.clone();
         ui.on_zal_close_create_event(move || {
-            ctx.borrow_mut().create_event_open = false;
+            let mut c = ctx.borrow_mut();
+            c.create_event_open = false;
+            c.create_repeat_open = false;
             if let Some(ui) = ui_weak.upgrade() {
-                apply_zalender(&ui, &ctx.borrow());
+                apply_zalender(&ui, &c);
             }
         });
     }
@@ -1642,6 +1761,167 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
         let ctx = ctx.clone();
         ui.on_zal_create_set_title(move |t| {
             ctx.borrow_mut().create_title = t.to_string();
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        ui.on_zal_create_set_location(move |t| {
+            ctx.borrow_mut().create_location = t.to_string();
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        ui.on_zal_create_set_description(move |t| {
+            ctx.borrow_mut().create_description = t.to_string();
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_shift_date(move |delta| {
+            {
+                let mut c = ctx.borrow_mut();
+                shift_create_date(&mut c, delta);
+            }
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &ctx.borrow());
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_open_repeat(move || {
+            {
+                let mut c = ctx.borrow_mut();
+                c.create_repeat = true;
+                c.create_repeat_open = true;
+                if !c.create_weekdays.iter().any(|on| *on) {
+                    if let Ok(day) = NaiveDate::parse_from_str(&c.create_date_key, "%Y-%m-%d") {
+                        c.create_weekdays[sunday_index(day)] = true;
+                    }
+                }
+            }
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &ctx.borrow());
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_close_repeat(move || {
+            ctx.borrow_mut().create_repeat_open = false;
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &ctx.borrow());
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_clear_repeat(move || {
+            let mut c = ctx.borrow_mut();
+            c.create_repeat = false;
+            c.create_repeat_open = false;
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &c);
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_set_repeat_interval(move |n| {
+            ctx.borrow_mut().create_repeat_interval = n.clamp(1, 99);
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &ctx.borrow());
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_set_repeat_unit(move |n| {
+            let mut c = ctx.borrow_mut();
+            c.create_repeat_unit = n.clamp(0, 4);
+            if c.create_repeat_unit == 1 && !c.create_weekdays.iter().any(|on| *on) {
+                if let Ok(day) = NaiveDate::parse_from_str(&c.create_date_key, "%Y-%m-%d") {
+                    c.create_weekdays[sunday_index(day)] = true;
+                }
+            }
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &c);
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_set_repeat_end(move |n| {
+            ctx.borrow_mut().create_repeat_end = n.clamp(0, 2);
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &ctx.borrow());
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_shift_until(move |delta| {
+            {
+                let mut c = ctx.borrow_mut();
+                let base = NaiveDate::parse_from_str(&c.create_repeat_until, "%Y-%m-%d")
+                    .or_else(|_| NaiveDate::parse_from_str(&c.create_date_key, "%Y-%m-%d"));
+                if let Ok(day) = base {
+                    let next = day + chrono::Duration::days(i64::from(delta));
+                    let floor =
+                        NaiveDate::parse_from_str(&c.create_date_key, "%Y-%m-%d").unwrap_or(next);
+                    let next = if next < floor { floor } else { next };
+                    c.create_repeat_until = next.format("%Y-%m-%d").to_string();
+                }
+            }
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &ctx.borrow());
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_set_repeat_count(move |n| {
+            ctx.borrow_mut().create_repeat_count = n.clamp(1, 999);
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &ctx.borrow());
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_toggle_weekday(move |index| {
+            let mut c = ctx.borrow_mut();
+            let index = index.max(0) as usize;
+            if index < 7 {
+                let turning_off = c.create_weekdays[index];
+                let selected = c.create_weekdays.iter().filter(|on| **on).count();
+                if !(turning_off && selected <= 1) {
+                    c.create_weekdays[index] = !turning_off;
+                }
+            }
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &c);
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_zal_create_set_by_weekday(move |v| {
+            ctx.borrow_mut().create_by_weekday = v;
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_zalender(&ui, &ctx.borrow());
+            }
         });
     }
     {
@@ -1691,6 +1971,8 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                 let mut c = ctx.borrow_mut();
                 if let Some(ui) = ui_weak.upgrade() {
                     c.create_title = ui.get_zal_create_title().to_string();
+                    c.create_location = ui.get_zal_create_location().to_string();
+                    c.create_description = ui.get_zal_create_description().to_string();
                 }
                 let title = c.create_title.trim().to_string();
                 if title.is_empty() {
@@ -1722,9 +2004,15 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                         let end = local_mins_to_utc(day, c.create_end_mins as u32);
                         (start, end.max(start + chrono::Duration::minutes(15)), false)
                     };
-                    let ev = local_events::new_local_event(
+                    let mut ev = local_events::new_local_event(
                         title, start, end, all_day, feed_id, feed_name, color,
                     );
+                    ev.location = c.create_location.trim().to_string();
+                    ev.description = c.create_description.trim().to_string();
+                    if c.create_repeat {
+                        let tz = recur::parse_tz(&z.timezone);
+                        ev.rrule = Some(recur::rrule_from_draft(day, &repeat_draft(&c), tz));
+                    }
                     c.local_events.add(ev);
                     if let Err(e) = c.local_events.save_if_dirty() {
                         c.status = format!("Could not save event: {e:#}");
@@ -1732,6 +2020,7 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                     } else {
                         merge_local_into_snapshot(&mut c);
                         c.create_event_open = false;
+                        c.create_repeat_open = false;
                         c.status = "Event created.".into();
                         c.status_kind = 1;
                     }
@@ -2031,11 +2320,22 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
         let ui_weak = ui.as_weak();
         let ctx = ctx.clone();
         ui.on_zal_customize_set_field(move |id, val| {
-            ctx.borrow_mut()
-                .customize_fields
-                .insert(id.to_string(), val.to_string());
-            if let Some(ui) = ui_weak.upgrade() {
-                apply_zalender(&ui, &ctx.borrow());
+            let id = id.to_string();
+            // Rebuilding customize-fields replaces every TextInput, which drops
+            // the cursor after a keystroke. Yes/no and choice still need a refresh
+            // so the control shows the new value; text stays in the input itself.
+            let refresh = {
+                let mut c = ctx.borrow_mut();
+                c.customize_fields.insert(id.clone(), val.to_string());
+                c.config.zalender().custom_fields.iter().any(|f| {
+                    f.id == id
+                        && matches!(f.field_type, CustomFieldType::Bool | CustomFieldType::Choice)
+                })
+            };
+            if refresh {
+                if let Some(ui) = ui_weak.upgrade() {
+                    apply_zalender(&ui, &ctx.borrow());
+                }
             }
         });
     }
@@ -2243,6 +2543,7 @@ fn apply_theme(ui: &AppWindow, cfg: &Config) {
     theme.set_text_on_accent(color::parse_hex(&p.text_on_accent));
     theme.set_font_family(SharedString::from(cfg.font_family.family_name()));
     theme.set_font_scale(cfg.font_scale.factor());
+    theme.set_event_font_scale(cfg.event_font_scale.factor());
 }
 
 fn canonical_hex(raw: &str) -> Option<String> {
@@ -2273,15 +2574,63 @@ fn settings_feed_row(f: &FeedConfig) -> SettingsFeedRow {
     }
 }
 
-fn open_create_event_draft(c: &mut AppCtx, day: NaiveDate, start_mins: i32) {
+fn open_create_event_draft(c: &mut AppCtx, day: NaiveDate, start_mins: i32, all_day: bool) {
     let start = start_mins.clamp(0, 24 * 60 - 15);
     c.create_date_key = day.format("%Y-%m-%d").to_string();
     c.create_start_mins = start;
     c.create_end_mins = (start + 60).min(24 * 60);
-    c.create_all_day = false;
+    c.create_all_day = all_day;
     c.create_title.clear();
+    c.create_location.clear();
+    c.create_description.clear();
+    c.create_repeat = false;
+    c.create_repeat_open = false;
+    c.create_repeat_interval = 1;
+    c.create_repeat_unit = 0;
+    c.create_repeat_end = 0;
+    c.create_repeat_until = c.create_date_key.clone();
+    c.create_repeat_count = 10;
+    c.create_weekdays = [false; 7];
+    c.create_weekdays[sunday_index(day)] = true;
+    c.create_by_weekday = false;
     c.create_event_open = true;
     c.day_modal_open = false;
+}
+
+fn sunday_index(day: NaiveDate) -> usize {
+    day.weekday().num_days_from_sunday() as usize
+}
+
+fn shift_create_date(c: &mut AppCtx, delta: i32) {
+    let Ok(day) = NaiveDate::parse_from_str(&c.create_date_key, "%Y-%m-%d") else {
+        return;
+    };
+    let next = day + chrono::Duration::days(i64::from(delta));
+    let old_i = sunday_index(day);
+    let new_i = sunday_index(next);
+    let selected = c.create_weekdays.iter().filter(|on| **on).count();
+    if selected == 1 && c.create_weekdays[old_i] {
+        c.create_weekdays = [false; 7];
+        c.create_weekdays[new_i] = true;
+    }
+    c.create_date_key = next.format("%Y-%m-%d").to_string();
+    if let Ok(until) = NaiveDate::parse_from_str(&c.create_repeat_until, "%Y-%m-%d") {
+        if until < next {
+            c.create_repeat_until = c.create_date_key.clone();
+        }
+    }
+}
+
+fn repeat_draft(c: &AppCtx) -> RepeatDraft {
+    RepeatDraft {
+        interval: c.create_repeat_interval.max(1) as u32,
+        unit: c.create_repeat_unit.clamp(0, 4) as u8,
+        end: c.create_repeat_end.clamp(0, 2) as u8,
+        until: NaiveDate::parse_from_str(&c.create_repeat_until, "%Y-%m-%d").ok(),
+        count: c.create_repeat_count.max(1) as u32,
+        weekdays: c.create_weekdays,
+        by_weekday: c.create_by_weekday,
+    }
 }
 
 fn local_mins_to_utc(day: NaiveDate, mins: u32) -> chrono::DateTime<Utc> {
@@ -2306,6 +2655,15 @@ fn merge_local_into_snapshot(c: &mut AppCtx) {
     let today = Local::now().date_naive();
     let window_start = today - chrono::Duration::days(90);
     let window_end = today + chrono::Duration::days(365);
+    let from = window_start
+        .and_hms_opt(0, 0, 0)
+        .map(|n| Utc.from_utc_datetime(&n))
+        .unwrap_or_else(Utc::now);
+    let to = window_end
+        .and_hms_opt(23, 59, 59)
+        .map(|n| Utc.from_utc_datetime(&n))
+        .unwrap_or_else(Utc::now);
+    let tz = recur::parse_tz(&c.config.zalender().timezone);
     let stored: std::collections::HashSet<&str> = c
         .local_events
         .events()
@@ -2323,12 +2681,38 @@ fn merge_local_into_snapshot(c: &mut AppCtx) {
                 .collect()
         })
         .unwrap_or_default();
-    events.extend(c.local_events.events().iter().cloned());
+    events.extend(
+        c.local_events
+            .events()
+            .iter()
+            .flat_map(|ev| recur::expand_stored(ev, from, to, tz)),
+    );
     c.snapshot = Some(CalendarSnapshot::from_events(
         events,
         window_start,
         window_end,
     ));
+}
+
+fn patch_theme_color(ui: &AppWindow, index: usize, id: &str, label: &str, hex: &str) -> bool {
+    let model = ui.get_theme_colors();
+    let Some(rows) = model.as_any().downcast_ref::<VecModel<ThemeColorRow>>() else {
+        return false;
+    };
+    if index >= rows.row_count() {
+        return false;
+    }
+    rows.set_row_data(
+        index,
+        ThemeColorRow {
+            id: SharedString::from(id),
+            label: SharedString::from(label),
+            hex: SharedString::from(hex),
+            swatch: color::parse_hex(hex),
+            tip: SharedString::from(theme_color_tip(id)),
+        },
+    );
+    true
 }
 
 fn patch_settings_feed(ui: &AppWindow, index: usize, feed: &FeedConfig) -> bool {
@@ -2581,6 +2965,7 @@ fn apply_settings(ui: &AppWindow, c: &AppCtx) {
     ui.set_datetime_format(c.config.datetime_format.as_i32());
     ui.set_font_family(c.config.font_family.as_i32());
     ui.set_font_scale(c.config.font_scale.as_i32());
+    ui.set_event_font_scale(c.config.event_font_scale.as_i32());
     ui.set_modal_show_time(z.day_modal.show_time);
     ui.set_modal_show_title(z.day_modal.show_title);
     ui.set_modal_show_calendar(z.day_modal.show_calendar);
@@ -2632,12 +3017,9 @@ fn apply_settings(ui: &AppWindow, c: &AppCtx) {
         DatetimeFormat::YyyyMmDd24h.label(),
         DatetimeFormat::DdMmYyyy24h.label(),
     ]));
-    ui.set_font_family_options(string_model(&[
-        UiFontFamily::System.label(),
-        UiFontFamily::Sans.label(),
-        UiFontFamily::Serif.label(),
-        UiFontFamily::Mono.label(),
-    ]));
+    let font_choices = UiFontFamily::all();
+    ui.set_font_family_options(string_model(&font_choices.map(UiFontFamily::label)));
+    ui.set_font_family_faces(string_model(&font_choices.map(UiFontFamily::family_name)));
     ui.set_font_scale_options(string_model(&[
         FontScale::Small.label(),
         FontScale::Medium.label(),
@@ -2652,6 +3034,12 @@ fn apply_settings(ui: &AppWindow, c: &AppCtx) {
     ]));
     ui.set_new_field_type(c.new_field_type.as_i32());
     ui.set_new_field_name(SharedString::from(c.new_field_name.as_str()));
+    ui.set_new_field_options(ModelRc::new(VecModel::from(
+        c.new_field_options
+            .iter()
+            .map(|s| SharedString::from(s.as_str()))
+            .collect::<Vec<_>>(),
+    )));
 
     let defs: Vec<SettingsFieldDefRow> = z
         .custom_fields
@@ -2659,7 +3047,7 @@ fn apply_settings(ui: &AppWindow, c: &AppCtx) {
         .map(|f| SettingsFieldDefRow {
             id: SharedString::from(f.id.as_str()),
             name: SharedString::from(f.name.as_str()),
-            type_label: SharedString::from(f.field_type.label()),
+            type_label: SharedString::from(field_type_label(f)),
         })
         .collect();
     ui.set_custom_field_defs(ModelRc::new(VecModel::from(defs)));
@@ -2670,6 +3058,25 @@ fn apply_settings(ui: &AppWindow, c: &AppCtx) {
     } else {
         ui.set_perf_overlay(SharedString::from(""));
     }
+}
+
+fn ensure_two_choices(options: &mut Vec<String>) {
+    while options.len() < 2 {
+        options.push(String::new());
+    }
+}
+
+fn field_type_label(f: &CustomFieldDef) -> String {
+    if f.field_type != CustomFieldType::Choice {
+        return f.field_type.label().to_string();
+    }
+    let list = f
+        .options
+        .iter()
+        .map(|o| if o.is_empty() { "(blank)" } else { o.as_str() })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    format!("Choice: {list}")
 }
 
 fn string_model(items: &[&str]) -> ModelRc<SharedString> {
@@ -2841,17 +3248,6 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
         .map(|s| (s.end_mins - s.start_mins, s.start_mins))
         .unwrap_or((60, 0));
     ui.set_zal_hour_slots(ModelRc::new(VecModel::from(hour_slots)));
-    ui.set_zal_day_hour_buckets(ModelRc::new(VecModel::from(
-        hour_preset
-            .hour_slots()
-            .into_iter()
-            .map(|(label, start, end)| DayHourBucket {
-                label: SharedString::from(label),
-                start_mins: start as i32,
-                end_mins: end as i32,
-            })
-            .collect::<Vec<_>>(),
-    )));
 
     let labels = zal_view::week_labels(week_start);
     ui.set_zal_week_labels(ModelRc::new(VecModel::from(
@@ -2892,6 +3288,12 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
 
     let (main_days, year_titles) =
         build_main_days(c, &z, today, week_start, &visible, slot_grid, &hour_preset);
+    let all_day_rows = if matches!(c.view_unit, ViewUnit::Day | ViewUnit::Week) {
+        main_days.iter().map(|cell| cell.all_day_count).max().unwrap_or(0)
+    } else {
+        0
+    };
+    ui.set_zal_all_day_rows(all_day_rows);
     ui.set_zal_main_days(ModelRc::new(VecModel::from(main_days)));
     ui.set_zal_year_month_titles(ModelRc::new(VecModel::from(
         year_titles
@@ -2943,11 +3345,13 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
     ui.set_zal_name_local_draft(SharedString::from(c.name_local_draft.as_str()));
     ui.set_zal_create_event_open(c.create_event_open);
     ui.set_zal_create_title(SharedString::from(c.create_title.as_str()));
+    ui.set_zal_create_location(SharedString::from(c.create_location.as_str()));
+    ui.set_zal_create_description(SharedString::from(c.create_description.as_str()));
     ui.set_zal_create_date_key(SharedString::from(c.create_date_key.as_str()));
+    let create_day =
+        NaiveDate::parse_from_str(&c.create_date_key, "%Y-%m-%d").unwrap_or(c.selected_day);
     ui.set_zal_create_date_label(SharedString::from(
-        NaiveDate::parse_from_str(&c.create_date_key, "%Y-%m-%d")
-            .map(|d| d.format("%A, %B %e").to_string())
-            .unwrap_or_else(|_| c.create_date_key.clone()),
+        create_day.format("%A, %B %e").to_string(),
     ));
     ui.set_zal_create_start_mins(c.create_start_mins);
     ui.set_zal_create_end_mins(c.create_end_mins);
@@ -2969,6 +3373,50 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
     ui.set_zal_create_calendar_name(SharedString::from(create_name));
     ui.set_zal_create_start_label(SharedString::from(mins_label(c.create_start_mins)));
     ui.set_zal_create_end_label(SharedString::from(mins_label(c.create_end_mins)));
+    let draft = repeat_draft(c);
+    let (month_dom, month_nth) = recur::month_choice_labels(create_day);
+    let (quarter_dom, quarter_nth) = recur::quarter_choice_labels(create_day);
+    ui.set_zal_create_repeat(c.create_repeat);
+    ui.set_zal_create_repeat_open(c.create_repeat_open);
+    ui.set_zal_create_repeat_interval(c.create_repeat_interval);
+    ui.set_zal_create_repeat_unit(c.create_repeat_unit);
+    ui.set_zal_create_repeat_end(c.create_repeat_end);
+    ui.set_zal_create_repeat_count(c.create_repeat_count);
+    ui.set_zal_create_by_weekday(c.create_by_weekday);
+    ui.set_zal_create_repeat_summary(SharedString::from(recur::repeat_summary(
+        create_day, &draft,
+    )));
+    ui.set_zal_create_until_label(SharedString::from(
+        NaiveDate::parse_from_str(&c.create_repeat_until, "%Y-%m-%d")
+            .map(|d| d.format("%A, %B %e").to_string())
+            .unwrap_or_else(|_| c.create_repeat_until.clone()),
+    ));
+    ui.set_zal_create_month_dom_label(SharedString::from(month_dom));
+    ui.set_zal_create_month_nth_label(SharedString::from(month_nth));
+    ui.set_zal_create_quarter_dom_label(SharedString::from(quarter_dom));
+    ui.set_zal_create_quarter_nth_label(SharedString::from(quarter_nth));
+    let unit_words: [&str; 5] = if c.create_repeat_interval == 1 {
+        ["Day", "Week", "Month", "Quarterly", "Year"]
+    } else {
+        ["Days", "Weeks", "Months", "Quarters", "Years"]
+    };
+    ui.set_zal_create_repeat_units(ModelRc::new(VecModel::from(
+        unit_words
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
+    const WEEK_LETTERS: [&str; 7] = ["S", "M", "T", "W", "T", "F", "S"];
+    let weekdays: Vec<RepeatWeekday> = WEEK_LETTERS
+        .iter()
+        .enumerate()
+        .map(|(i, letter)| RepeatWeekday {
+            letter: SharedString::from(*letter),
+            index: i as i32,
+            on: c.create_weekdays[i],
+        })
+        .collect();
+    ui.set_zal_create_weekdays(ModelRc::new(VecModel::from(weekdays)));
 
     ui.set_zal_event_detail_open(c.event_detail_open);
     let detail = detail_event_row(c, &visible, &z);
@@ -2996,10 +3444,23 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
             name: SharedString::from(f.name.as_str()),
             field_type: f.field_type.as_i32(),
             value: SharedString::from(c.customize_fields.get(&f.id).cloned().unwrap_or_default()),
-            options: SharedString::from(f.options.join("|")),
+            option_count: f.options.len() as i32,
+            has_blank: f.options.iter().any(|o| o.is_empty()),
         })
         .collect();
     ui.set_zal_customize_fields(ModelRc::new(VecModel::from(custom_rows)));
+    let choice_rows: Vec<ChoiceOption> = z
+        .custom_fields
+        .iter()
+        .filter(|f| f.field_type == CustomFieldType::Choice)
+        .flat_map(|f| {
+            f.options.iter().map(|label| ChoiceOption {
+                field_id: SharedString::from(f.id.as_str()),
+                label: SharedString::from(label.as_str()),
+            })
+        })
+        .collect();
+    ui.set_zal_customize_choices(ModelRc::new(VecModel::from(choice_rows)));
     ui.set_zal_edit_placeholder_open(c.edit_placeholder_open);
 }
 
@@ -3441,6 +3902,7 @@ fn event_to_row(
         } else {
             ""
         }),
+        location: SharedString::from(e.location.as_str()),
         color: color::parse_hex(&resolved.color),
         icon: SharedString::from(resolved.icon.as_str()),
         writable,
@@ -3487,6 +3949,7 @@ fn detail_event_row(
         title: SharedString::from(""),
         calendar: SharedString::from(""),
         description: SharedString::from(""),
+        location: SharedString::from(""),
         color: color::parse_hex("#3b82f6"),
         icon: SharedString::from(""),
         writable: false,

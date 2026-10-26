@@ -234,6 +234,8 @@ mod tests {
             feed_name: "Work".into(),
             color: "#3b82f6".into(),
             description: String::new(),
+            location: String::new(),
+            rrule: None,
         }
     }
 

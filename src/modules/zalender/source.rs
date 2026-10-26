@@ -253,6 +253,7 @@ pub fn parse_ics(
             .map(str::to_string)
             .unwrap_or_else(|| format!("{}-{}", feed.id, title));
         let description = ev.get_description().unwrap_or("").to_string();
+        let location = ev.property_value("LOCATION").unwrap_or("").to_string();
 
         let Some(start_dpt) = ev.get_start() else {
             continue;
@@ -290,6 +291,8 @@ pub fn parse_ics(
                     feed_name: feed.name.clone(),
                     color: feed.color.clone(),
                     description: description.clone(),
+                    location: location.clone(),
+                    rrule: None,
                 });
             }
         } else if end >= from && start <= to {
@@ -304,6 +307,8 @@ pub fn parse_ics(
                 feed_name: feed.name.clone(),
                 color: feed.color.clone(),
                 description,
+                location,
+                rrule: None,
             });
         }
     }

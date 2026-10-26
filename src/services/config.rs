@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use super::storage::{self, Paths};
 
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -329,7 +329,8 @@ impl AnchorMode {
     }
 }
 
-/// UI typeface for the whole app (Window default-font-family).
+/// UI typeface for the whole app. Faces other than System are bundled
+/// (`assets/fonts/ui`, SIL OFL) so the choice resolves on every device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UiFontFamily {
@@ -338,48 +339,67 @@ pub enum UiFontFamily {
     Sans,
     Serif,
     Mono,
+    Display,
+    Condensed,
+    Hand,
+    Bungee,
 }
 
 impl UiFontFamily {
+    pub fn all() -> [Self; 8] {
+        [
+            Self::System,
+            Self::Sans,
+            Self::Serif,
+            Self::Mono,
+            Self::Display,
+            Self::Condensed,
+            Self::Hand,
+            Self::Bungee,
+        ]
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::System => "System default",
-            Self::Sans => "Sans (Arial)",
-            Self::Serif => "Serif (Georgia)",
-            Self::Mono => "Monospace",
+            Self::Sans => "Nunito",
+            Self::Serif => "Libre Baskerville",
+            Self::Mono => "IBM Plex Mono",
+            Self::Display => "Playfair Display",
+            Self::Condensed => "Oswald",
+            Self::Hand => "Caveat",
+            Self::Bungee => "Bungee",
         }
     }
 
     /// Empty string keeps the platform default font.
+    /// Other names match the bundled font's typographic family.
     pub fn family_name(self) -> &'static str {
         match self {
             Self::System => "",
-            Self::Sans => "Arial",
-            Self::Serif => "Georgia",
-            Self::Mono => "Courier New",
+            Self::Sans => "Nunito",
+            Self::Serif => "Libre Baskerville",
+            Self::Mono => "IBM Plex Mono",
+            Self::Display => "Playfair Display",
+            Self::Condensed => "Oswald",
+            Self::Hand => "Caveat",
+            Self::Bungee => "Bungee",
         }
     }
 
     pub fn as_i32(self) -> i32 {
-        match self {
-            Self::System => 0,
-            Self::Sans => 1,
-            Self::Serif => 2,
-            Self::Mono => 3,
-        }
+        Self::all()
+            .iter()
+            .position(|f| *f == self)
+            .unwrap_or(0) as i32
     }
 
     pub fn from_i32(v: i32) -> Self {
-        match v {
-            1 => Self::Sans,
-            2 => Self::Serif,
-            3 => Self::Mono,
-            _ => Self::System,
-        }
+        Self::all().get(v as usize).copied().unwrap_or_default()
     }
 }
 
-/// Scales Theme font tokens (title/body/caption/clock/event) for all views.
+/// App font size (shell, settings, calendar chrome). Event chip text uses `Config::event_font_scale`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FontScale {
@@ -799,6 +819,9 @@ pub struct Config {
     pub font_family: UiFontFamily,
     #[serde(default)]
     pub font_scale: FontScale,
+    /// Event title and time text on the calendar main view.
+    #[serde(default)]
+    pub event_font_scale: FontScale,
     #[serde(default)]
     pub modules: BTreeMap<String, ModuleConfig>,
 }
@@ -933,6 +956,7 @@ impl Default for Config {
             datetime_format: DatetimeFormat::default(),
             font_family: UiFontFamily::default(),
             font_scale: FontScale::default(),
+            event_font_scale: FontScale::default(),
             modules,
         }
     }
@@ -1212,6 +1236,10 @@ fn migrate(mut cfg: Config) -> Result<Config> {
         if next == 7 {
             // font_family / font_scale default via serde on Config.
         }
+        if next == 8 {
+            // Keep the previous combined size until the user picks Event font size.
+            cfg.event_font_scale = cfg.font_scale;
+        }
         cfg.schema_version = next;
     }
     if !cfg.modules.contains_key("zalender") {
@@ -1230,6 +1258,20 @@ fn migrate(mut cfg: Config) -> Result<Config> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn font_family_indices_match_menu_order() {
+        for (i, family) in UiFontFamily::all().into_iter().enumerate() {
+            assert_eq!(family.as_i32(), i as i32);
+            assert_eq!(UiFontFamily::from_i32(i as i32), family);
+            if family == UiFontFamily::System {
+                assert!(family.family_name().is_empty());
+            } else {
+                assert_eq!(family.family_name(), family.label());
+            }
+        }
+        assert_eq!(UiFontFamily::from_i32(99), UiFontFamily::System);
+    }
 
     #[test]
     fn default_feed_is_exclusive() {
@@ -1280,6 +1322,7 @@ mod tests {
             datetime_format: DatetimeFormat::default(),
             font_family: UiFontFamily::default(),
             font_scale: FontScale::default(),
+            event_font_scale: FontScale::default(),
             modules: BTreeMap::new(),
         };
         cfg = migrate(cfg).unwrap();
@@ -1332,6 +1375,7 @@ mod tests {
             datetime_format: DatetimeFormat::default(),
             font_family: UiFontFamily::default(),
             font_scale: FontScale::default(),
+            event_font_scale: FontScale::default(),
             modules,
         };
         cfg = migrate(cfg).unwrap();
@@ -1367,6 +1411,7 @@ mod tests {
             datetime_format: DatetimeFormat::default(),
             font_family: UiFontFamily::default(),
             font_scale: FontScale::default(),
+            event_font_scale: FontScale::default(),
             modules,
         };
         // Simulate pre-migrate deserialize: clear builtins that Default seeded.
@@ -1406,6 +1451,7 @@ mod tests {
             datetime_format: DatetimeFormat::default(),
             font_family: UiFontFamily::default(),
             font_scale: FontScale::default(),
+            event_font_scale: FontScale::default(),
             modules,
         };
         cfg = migrate(cfg).unwrap();
@@ -1414,6 +1460,20 @@ mod tests {
         assert!(z.presets.iter().any(|p| p.id == "preset-agenda"));
         assert!(z.display.dim_past);
         assert!(z.display.shade_weekends);
+    }
+
+    #[test]
+    fn migrate_v7_copies_font_scale_onto_events() {
+        let mut cfg = Config {
+            schema_version: 7,
+            font_scale: FontScale::Large,
+            event_font_scale: FontScale::Medium,
+            ..Config::default()
+        };
+        cfg = migrate(cfg).unwrap();
+        assert_eq!(cfg.schema_version, SCHEMA_VERSION);
+        assert_eq!(cfg.font_scale, FontScale::Large);
+        assert_eq!(cfg.event_font_scale, FontScale::Large);
     }
 
     #[test]
@@ -1427,6 +1487,7 @@ mod tests {
             datetime_format: DatetimeFormat::default(),
             font_family: UiFontFamily::default(),
             font_scale: FontScale::default(),
+            event_font_scale: FontScale::default(),
             modules: BTreeMap::new(),
         };
         cfg = migrate(cfg).unwrap();

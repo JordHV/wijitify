@@ -1,7 +1,7 @@
 import { Theme } from "../../theme.slint";
 import { Icons, FaIcon, EventIcon } from "../../icons.slint";
 import {
-    Button, IconButton, PillButton, ViewPill, Field, Switch, ColorBox, TextEditActions
+    Button, IconButton, PillButton, ViewPill, Field, LongField, Switch, Dropdown, ColorBox, TextEditActions
 } from "../../shell/kit.slint";
 
 /// Timed: surface fill + color bar. All-day: solid event color.
@@ -23,16 +23,18 @@ component EventChip inherits Rectangle {
     border-radius: root.compact ? 3px : 4px;
 
     line-probe := Text {
+        font-family: Theme.font-family;
         width: 0px;
         height: 0px;
         opacity: 0;
         accessible-role: none;
         text: "Ag";
-        font-size: root.compact ? 11px : Theme.font-event;
+        font-size: root.compact ? Theme.font-event-compact : Theme.font-event;
         font-weight: 600;
     }
     property <length> title-block: line-probe.preferred-height * root.lines;
-    min-height: root.title-block + (root.show-time && root.time-text != "" ? 16px : 0px) + 4px;
+    property <length> time-size: root.compact ? Theme.font-event-time-compact : Theme.font-event-time;
+    min-height: root.title-block + (root.show-time && root.time-text != "" ? root.time-size + 2px : 0px) + 4px;
 
     HorizontalLayout {
         width: 100%;
@@ -52,9 +54,10 @@ component EventChip inherits Rectangle {
             spacing: 0px;
             alignment: start;
             Text {
+                font-family: Theme.font-family;
                 text: root.title;
                 color: root.all-day ? Theme.text-on-accent : Theme.text;
-                font-size: root.compact ? 11px : Theme.font-event;
+                font-size: root.compact ? Theme.font-event-compact : Theme.font-event;
                 font-weight: root.all-day || !root.compact ? 600 : 500;
                 wrap: root.multi ? word-wrap : no-wrap;
                 overflow: elide;
@@ -65,9 +68,10 @@ component EventChip inherits Rectangle {
                 min-height: root.title-block;
             }
             if root.show-time && root.time-text != "": Text {
+                font-family: Theme.font-family;
                 text: root.time-text;
                 color: root.all-day ? Theme.text-on-accent : Theme.muted;
-                font-size: root.compact ? 9px : Theme.font-caption;
+                font-size: root.time-size;
                 overflow: elide;
                 horizontal-stretch: 1;
             }
@@ -108,6 +112,7 @@ component FeedCheckRow inherits TouchArea {
             }
         }
         Text {
+            font-family: Theme.font-family;
             text: root.name;
             color: Theme.text;
             font-size: Theme.font-caption;
@@ -133,6 +138,7 @@ export struct EventRow {
     title: string,
     calendar: string,
     description: string,
+    location: string,
     color: color,
     icon: string,
     writable: bool,
@@ -190,10 +196,125 @@ export struct DayHourBucket {
 export struct CustomFieldRow {
     id: string,
     name: string,
-    /// 0 text, 1 long, 2 bool, 3 choice
+    /// 0 short text, 1 long text, 2 yes/no, 3 choice
     field-type: int,
     value: string,
-    options: string,
+    option-count: int,
+    /// Choice list includes an empty option.
+    has-blank: bool,
+}
+
+export struct ChoiceOption {
+    field-id: string,
+    label: string,
+}
+
+/// Full-width choice list. Options for every choice field share one model.
+component ChoiceDropdown inherits VerticalLayout {
+    in property <string> value: "";
+    in property <string> field-id: "";
+    in property <int> option-count: 0;
+    in property <bool> has-blank: false;
+    in property <[ChoiceOption]> options;
+    // id, value. The id is a copy taken on open — the field repeater index is
+    // wrong if it is read from inside a popup or after the model refreshes.
+    callback picked(string, string);
+
+    spacing: 2px;
+    horizontal-stretch: 1;
+    min-width: 0px;
+
+    property <bool> open: false;
+    // Plain copy of field-id. Assignment drops the binding so a later model
+    // refresh cannot retarget the choice onto another field.
+    property <string> id-snap: "";
+    property <string> shown: root.value != "" ? root.value : (root.has-blank ? "(blank)" : "Choose");
+
+    changed field-id => { root.id-snap = root.field-id; }
+
+    ta := TouchArea {
+        height: Theme.touch-min;
+        horizontal-stretch: 1;
+        min-width: 0px;
+        clicked => {
+            root.id-snap = root.field-id;
+            if root.option-count > 0 {
+                root.open = !root.open;
+            }
+        }
+        Rectangle {
+            y: 8px;
+            width: parent.width;
+            height: parent.height - 16px;
+            background: ta.pressed ? Theme.surface-press : Theme.surface-2;
+            border-radius: Theme.radius;
+            HorizontalLayout {
+                height: 100%;
+                padding-left: Theme.pad-sm;
+                padding-right: Theme.pad-sm;
+                spacing: 4px;
+                alignment: center;
+                cross-axis-alignment: center;
+                Text {
+                    font-family: Theme.font-family;
+                    text: root.shown;
+                    color: root.value == "" && !root.has-blank ? Theme.muted : Theme.text;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                    horizontal-alignment: left;
+                    min-width: 0px;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                FaIcon {
+                    glyph: root.open ? Icons.chevron-up : Icons.chevron-down;
+                    size: 12px;
+                    tone: Theme.muted;
+                }
+            }
+        }
+    }
+
+    if root.open: VerticalLayout {
+        spacing: 2px;
+        width: 100%;
+        min-width: 0px;
+        for opt[i] in root.options: opt-row := TouchArea {
+            property <string> label: opt.label;
+            visible: opt.field-id == root.id-snap;
+            height: Theme.touch-min;
+            min-width: 0px;
+            clicked => {
+                root.picked(root.id-snap, root.options[i].label);
+                root.open = false;
+            }
+            Rectangle {
+                y: 1px;
+                height: Theme.touch-min - 2px;
+                width: 100%;
+                background: opt-row.pressed ? Theme.surface-press
+                    : (opt-row.label == root.value ? Theme.accent : Theme.surface-2);
+                border-radius: Theme.radius;
+                HorizontalLayout {
+                    padding-left: Theme.pad-sm;
+                    padding-right: Theme.pad-sm;
+                    alignment: center;
+                    Text {
+                        font-family: Theme.font-family;
+                        text: opt-row.label == "" ? "(blank)" : opt-row.label;
+                        color: opt-row.label == root.value ? Theme.text-on-accent : Theme.text;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                        horizontal-alignment: left;
+                        min-width: 0px;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        height: 100%;
+                    }
+                }
+            }
+        }
+    }
 }
 
 component MiniMonth inherits VerticalLayout {
@@ -207,6 +328,7 @@ component MiniMonth inherits VerticalLayout {
     spacing: 2px;
 
     Text {
+        font-family: Theme.font-family;
         text: root.title;
         color: Theme.text;
         font-size: Theme.font-caption;
@@ -218,9 +340,10 @@ component MiniMonth inherits VerticalLayout {
         spacing: 1px;
         Row {
             for w in week-labels: Text {
+                font-family: Theme.font-family;
                 text: w;
                 color: Theme.muted;
-                font-size: 10px;
+                font-size: 10px * Theme.font-scale;
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 min-width: 0px;
@@ -255,9 +378,10 @@ component MiniMonth inherits VerticalLayout {
                         y: (parent.height - self.height) / 2 - 1px;
                     }
                     Text {
+                        font-family: Theme.font-family;
                         text: ta.d.label;
                         color: ta.d.is-today ? Theme.text-on-accent : Theme.text;
-                        font-size: 11px;
+                        font-size: 11px * Theme.font-scale;
                         font-weight: ta.d.is-today || ta.d.is-selected ? 700 : 400;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -294,12 +418,13 @@ component MonthGrid inherits Rectangle {
     background: Theme.bg;
 
     line-probe := Text {
+        font-family: Theme.font-family;
         width: 0px;
         height: 0px;
         opacity: 0;
         accessible-role: none;
         text: "Ag";
-        font-size: 11px;
+        font-size: Theme.font-event-compact;
         font-weight: 600;
     }
     property <length> chip-h: line-probe.preferred-height * clamp(root.title-lines, 1, 10) + 4px;
@@ -316,6 +441,7 @@ component MonthGrid inherits Rectangle {
             height: 28px;
             vertical-stretch: 0;
             for w in week-labels: Text {
+                font-family: Theme.font-family;
                 text: w;
                 color: Theme.muted;
                 font-size: Theme.font-caption;
@@ -378,6 +504,7 @@ component MonthGrid inherits Rectangle {
                                 border-radius: 11px;
                                 background: Theme.accent;
                                 Text {
+                                    font-family: Theme.font-family;
                                     // Day number only — label may include month abbr for other-month cells.
                                     text: ta.d.day;
                                     color: Theme.text-on-accent;
@@ -390,6 +517,7 @@ component MonthGrid inherits Rectangle {
                                 }
                             }
                             if !ta.d.is-today: Text {
+                                font-family: Theme.font-family;
                                 text: ta.d.label;
                                 color: Theme.text;
                                 font-size: Theme.font-caption;
@@ -411,6 +539,7 @@ component MonthGrid inherits Rectangle {
                         compact: true;
                     }
                     Text {
+                        font-family: Theme.font-family;
                         x: 5px;
                         y: 27px + ta.chip-limit * root.chip-stride;
                         width: parent.width - 10px;
@@ -418,12 +547,192 @@ component MonthGrid inherits Rectangle {
                         visible: ta.d.event-count > ta.chip-limit;
                         text: "+" + (ta.d.event-count - ta.chip-limit) + " more";
                         color: Theme.muted;
-                        font-size: 10px;
+                        font-size: 10px * Theme.font-scale;
                         font-weight: 500;
                         vertical-alignment: center;
                     }
                 }
             }
+        }
+    }
+}
+
+export struct RepeatWeekday {
+    letter: string,
+    index: int,
+    on: bool,
+}
+
+/// One event in the month/year day popup. Height follows the text, at least a touch target.
+component DayModalRow inherits Rectangle {
+    in property <string> title: "";
+    in property <string> time: "";
+    in property <string> calendar: "";
+    in property <color> event-color: Theme.accent;
+    in property <string> icon: "";
+    callback clicked();
+
+    height: max(Theme.touch-min, body.preferred-height);
+    horizontal-stretch: 1;
+    background: area.pressed ? Theme.surface-press : Theme.surface-2;
+    border-radius: Theme.radius;
+
+    body := HorizontalLayout {
+        padding: Theme.pad-sm;
+        spacing: Theme.pad-sm;
+        Rectangle {
+            width: 6px;
+            vertical-stretch: 1;
+            background: root.event-color;
+            border-radius: 3px;
+        }
+        VerticalLayout {
+            spacing: 2px;
+            horizontal-stretch: 1;
+            alignment: center;
+            if root.time != "": Text {
+                font-family: Theme.font-family;
+                text: root.time;
+                color: Theme.muted;
+                font-size: Theme.font-caption;
+                wrap: word-wrap;
+                width: 100%;
+            }
+            Text {
+                font-family: Theme.font-family;
+                text: root.title;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                wrap: word-wrap;
+                width: 100%;
+            }
+            if root.calendar != "": Text {
+                font-family: Theme.font-family;
+                text: root.calendar;
+                color: Theme.muted;
+                font-size: Theme.font-caption;
+                wrap: word-wrap;
+                width: 100%;
+            }
+        }
+        if root.icon != "": EventIcon {
+            id: root.icon;
+            size: Theme.font-body;
+            tone: root.event-color;
+        }
+    }
+    area := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+    }
+}
+
+component DayDot inherits TouchArea {
+    in property <string> letter;
+    in property <bool> on;
+    width: Theme.touch-min;
+    height: Theme.touch-min;
+    Rectangle {
+        width: 40px;
+        height: 40px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 20px;
+        background: root.on ? Theme.accent : Theme.surface-2;
+        border-width: root.on ? 0px : 2px;
+        border-color: Theme.muted;
+        Text {
+            font-family: Theme.font-family;
+            text: root.letter;
+            color: root.on ? Theme.text-on-accent : Theme.text;
+            font-size: Theme.font-body;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            width: 100%;
+            height: 100%;
+        }
+    }
+}
+
+/// Caption, value, and ±. The value elides so the row cannot force a horizontal scroll.
+component Stepper inherits HorizontalLayout {
+    in property <string> caption;
+    in property <string> value;
+    callback dec();
+    callback inc();
+
+    spacing: Theme.pad-sm;
+    alignment: stretch;
+    cross-axis-alignment: center;
+    min-width: 0px;
+
+    Text {
+        font-family: Theme.font-family;
+        text: root.caption;
+        color: Theme.muted;
+        font-size: Theme.font-caption;
+        vertical-alignment: center;
+        horizontal-stretch: 0;
+    }
+    Text {
+        font-family: Theme.font-family;
+        text: root.value;
+        color: Theme.text;
+        font-size: Theme.font-body;
+        horizontal-stretch: 1;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+        min-width: 0px;
+    }
+    Button {
+        label: "−";
+        role: "secondary";
+        square: true;
+        activate => { root.dec(); }
+    }
+    Button {
+        label: "+";
+        role: "secondary";
+        square: true;
+        activate => { root.inc(); }
+    }
+}
+
+component ChoiceRow inherits TouchArea {
+    in property <string> label;
+    in property <bool> selected;
+    min-height: Theme.touch-min;
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+        cross-axis-alignment: center;
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 11px;
+            border-width: 2px;
+            border-color: root.selected ? Theme.accent : Theme.muted;
+            background: transparent;
+            if root.selected: Rectangle {
+                width: 12px;
+                height: 12px;
+                x: 5px;
+                y: 5px;
+                border-radius: 6px;
+                background: Theme.accent;
+            }
+        }
+        Text {
+            font-family: Theme.font-family;
+            text: root.label;
+            color: Theme.text;
+            font-size: Theme.font-body;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
         }
     }
 }
@@ -454,6 +763,8 @@ export component ZalenderView inherits Rectangle {
     in property <int> month-rows: 6;
     /// Event title lines before ellipsis. The chip grows with this.
     in property <int> title-lines: 1;
+    /// Most all-day events on any day in the current day/week view.
+    in property <int> all-day-rows: 0;
     in property <string> side-title: "";
     in property <[DayCell]> side-days;
     in property <[DayCell]> main-days;
@@ -467,18 +778,32 @@ export component ZalenderView inherits Rectangle {
     // Per 48px hour row: one chip with time, else two compact chips.
     property <int> timed-max: show-event-time ? 1 : 2;
     timed-probe := Text {
+        font-family: Theme.font-family;
         width: 0px;
         height: 0px;
         opacity: 0;
         accessible-role: none;
         text: "Ag";
-        font-size: root.show-event-time ? Theme.font-event : 11px;
+        font-size: root.show-event-time ? Theme.font-event : Theme.font-event-compact;
         font-weight: 600;
     }
     property <length> timed-chip-h: timed-probe.preferred-height * clamp(root.title-lines, 1, 10)
-        + (root.show-event-time ? 18px : 4px);
-    /// Same slots for the month/year day modal hourly list.
-    in property <[DayHourBucket]> day-hour-buckets;
+        + (root.show-event-time ? Theme.font-event-time + 4px : 4px);
+    // Same metrics as an all-day EventChip so the band matches the chips.
+    all-day-probe := Text {
+        font-family: Theme.font-family;
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        accessible-role: none;
+        text: "Ag";
+        font-size: root.show-event-time ? Theme.font-event : Theme.font-event-compact;
+        font-weight: 600;
+    }
+    property <length> all-day-chip-h: all-day-probe.preferred-height * clamp(root.title-lines, 1, 10) + 4px;
+    // 2px padding each side, 2px between chips. Empty when nothing is all-day.
+    property <length> all-day-band-h: root.all-day-rows <= 0 ? 0px
+        : 4px + root.all-day-chip-h * root.all-day-rows + 2px * max(0, root.all-day-rows - 1);
     /// Minutes from midnight for the now-lollipop.
     in property <int> now-mins: 0;
     /// Title + time on chips (day / week·1 / agenda).
@@ -490,6 +815,9 @@ export component ZalenderView inherits Rectangle {
     in property <string> day-modal-title: "";
     in property <string> selected-date-key: "";
     in property <[EventRow]> day-events;
+    // events_on sorts all-day first, then timed by start.
+    property <bool> modal-has-all-day: day-events.length > 0 && day-events[0].all-day;
+    property <bool> modal-has-timed: day-events.length > 0 && !day-events[day-events.length - 1].all-day;
 
     in property <bool> name-local-open: false;
     in-out property <string> name-local-draft: "";
@@ -504,6 +832,23 @@ export component ZalenderView inherits Rectangle {
     in property <string> create-calendar-name: "Local calendar";
     in property <string> create-start-label: "";
     in property <string> create-end-label: "";
+    in-out property <string> create-location: "";
+    in-out property <string> create-description: "";
+    in property <bool> create-repeat: false;
+    in property <bool> create-repeat-open: false;
+    in property <string> create-repeat-summary: "";
+    in property <int> create-repeat-interval: 1;
+    in property <int> create-repeat-unit: 0;
+    in property <[string]> create-repeat-units;
+    in property <int> create-repeat-end: 0;
+    in property <string> create-until-label: "";
+    in property <int> create-repeat-count: 10;
+    in property <[RepeatWeekday]> create-weekdays;
+    in property <bool> create-by-weekday: false;
+    in property <string> create-month-dom-label: "";
+    in property <string> create-month-nth-label: "";
+    in property <string> create-quarter-dom-label: "";
+    in property <string> create-quarter-nth-label: "";
 
     in property <bool> event-detail-open: false;
     in property <EventRow> detail-event;
@@ -515,8 +860,32 @@ export component ZalenderView inherits Rectangle {
     in property <bool> customize-occurrence: false;
     in property <bool> customize-has-recurrence: false;
     in property <[CustomFieldRow]> customize-fields;
+    in property <[ChoiceOption]> customize-choices;
+    // Line box for the customize editors. Long text is three of these.
+    field-line := Text {
+        font-family: Theme.font-family;
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        accessible-role: none;
+        text: "Ag";
+        font-size: Theme.font-body;
+    }
+    property <length> line-h: max(field-line.preferred-height, Theme.font-body);
 
     in property <bool> edit-placeholder-open: false;
+    /// Settings (or another shell overlay) already dims the calendar.
+    in property <bool> hide-scrim: false;
+    property <bool> sheet-open: root.day-modal-open || root.event-detail-open
+        || root.create-event-open || root.create-repeat-open || root.customize-open
+        || root.edit-placeholder-open || root.name-local-open;
+    // Just under the front sheet so earlier scrims are not stacked.
+    property <int> sheet-scrim-z: root.create-repeat-open ? 84
+        : root.name-local-open ? 89
+        : root.edit-placeholder-open ? 79
+        : (root.customize-open || root.create-event-open) ? 69
+        : root.event-detail-open ? 59
+        : 49;
 
     callback prev-period();
     callback next-period();
@@ -532,9 +901,22 @@ export component ZalenderView inherits Rectangle {
     callback toggle-feed(int);
     callback set-default-feed(int);
     callback close-day-modal();
-    callback open-create-event(string, int);
+    callback open-create-event(string, int, bool);
     callback close-create-event();
     callback create-set-title(string);
+    callback create-set-location(string);
+    callback create-set-description(string);
+    callback create-shift-date(int);
+    callback create-open-repeat();
+    callback create-close-repeat();
+    callback create-clear-repeat();
+    callback create-set-repeat-interval(int);
+    callback create-set-repeat-unit(int);
+    callback create-set-repeat-end(int);
+    callback create-shift-until(int);
+    callback create-set-repeat-count(int);
+    callback create-toggle-weekday(int);
+    callback create-set-by-weekday(bool);
     callback create-set-all-day(bool);
     callback create-set-start-mins(int);
     callback create-set-end-mins(int);
@@ -561,7 +943,7 @@ export component ZalenderView inherits Rectangle {
         padding: 0;
         spacing: 0;
 
-        // Top chrome: Gear · collapse | [calendar] Today · <> · Month Year · Refresh
+        // Top chrome: Gear · collapse | Today · <> · Month Year …… preset · Default · Refresh
         // Logo assets kept under assets/zalender-logo-*.png for possible future use.
         Rectangle {
             min-height: Theme.touch-min + 8px;
@@ -626,6 +1008,7 @@ export component ZalenderView inherits Rectangle {
                     TouchArea {
                         clicked => { root.zoom-out(); }
                         Text {
+                            font-family: Theme.font-family;
                             text: root.title-period;
                             color: Theme.text;
                             font-size: Theme.font-title;
@@ -633,6 +1016,7 @@ export component ZalenderView inherits Rectangle {
                             vertical-alignment: center;
                         }
                     }
+                    Rectangle { horizontal-stretch: 1; }
                     ViewPill {
                         selected: root.preset-selected;
                         label: root.preset-label;
@@ -643,7 +1027,6 @@ export component ZalenderView inherits Rectangle {
                         label: "Default";
                         activate => { root.go-preset(); }
                     }
-                    Rectangle { horizontal-stretch: 1; }
                     IconButton {
                         glyph: Icons.refresh;
                         activate => { root.refresh(); }
@@ -665,12 +1048,14 @@ export component ZalenderView inherits Rectangle {
                 spacing: Theme.pad;
                 alignment: center;
                 Text {
+                    font-family: Theme.font-family;
                     text: "No calendars yet";
                     color: Theme.text;
                     font-size: Theme.font-title;
                     horizontal-alignment: center;
                 }
                 Text {
+                    font-family: Theme.font-family;
                     text: "Add an ICS feed in Settings or run setup again.";
                     color: Theme.muted;
                     font-size: Theme.font-body;
@@ -723,6 +1108,7 @@ export component ZalenderView inherits Rectangle {
                             alignment: start;
 
                             Text {
+                                font-family: Theme.font-family;
                                 text: "Editable calendars";
                                 color: Theme.muted;
                                 font-size: Theme.font-caption;
@@ -765,6 +1151,7 @@ export component ZalenderView inherits Rectangle {
                                                 }
                                             }
                                             Text {
+                                                font-family: Theme.font-family;
                                                 text: "Default";
                                                 color: f.is-default ? Theme.text : Theme.muted;
                                                 font-size: Theme.font-caption;
@@ -779,6 +1166,7 @@ export component ZalenderView inherits Rectangle {
                             HorizontalLayout {
                                 spacing: 4px;
                                 Text {
+                                    font-family: Theme.font-family;
                                     text: "ICS calendars";
                                     color: Theme.muted;
                                     font-size: Theme.font-caption;
@@ -875,9 +1263,10 @@ export component ZalenderView inherits Rectangle {
                                         alignment: center;
                                         // Weekday above day number — both centered in the column.
                                         Text {
+                                            font-family: Theme.font-family;
                                             text: cell.label;
                                             color: cell.is-today ? Theme.accent : Theme.muted;
-                                            font-size: root.view-unit == 1 ? 11px : Theme.font-caption;
+                                            font-size: root.view-unit == 1 ? 11px * Theme.font-scale : Theme.font-caption;
                                             font-weight: 600;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
@@ -896,6 +1285,7 @@ export component ZalenderView inherits Rectangle {
                                                 background: cell.is-today ? Theme.accent
                                                     : (cell.is-selected ? Theme.selection-fill : transparent);
                                                 Text {
+                                                    font-family: Theme.font-family;
                                                     text: cell.day;
                                                     color: cell.is-today ? Theme.text-on-accent : Theme.text;
                                                     font-size: Theme.font-body;
@@ -913,16 +1303,18 @@ export component ZalenderView inherits Rectangle {
                         }
                     }
 
-                    // All-day chips use the preset title line count and grow the row.
-                    HorizontalLayout {
+                    // As tall as the busiest day's all-day events. Other days leave empty space below theirs.
+                    if root.all-day-rows > 0: HorizontalLayout {
                         spacing: 0px;
                         width: 100%;
-                        min-height: 48px;
+                        min-height: root.all-day-band-h;
+                        max-height: root.all-day-band-h;
                         vertical-stretch: 0;
                         Text {
+                            font-family: Theme.font-family;
                             text: "All day";
                             color: Theme.muted;
-                            font-size: 11px;
+                            font-size: 11px * Theme.font-scale;
                             min-width: 56px;
                             max-width: 56px;
                             preferred-width: 56px;
@@ -939,8 +1331,6 @@ export component ZalenderView inherits Rectangle {
                             horizontal-stretch: 1;
                             vertical-stretch: 0;
                             for cell[d] in main-days: Rectangle {
-                                // Cap at 2 double-height chips (~80px); overflow uses "+N more".
-                                property <int> ad-limit: cell.all-day-count > 2 ? 1 : min(cell.all-day-count, 2);
                                 min-width: 0px;
                                 preferred-width: 0px;
                                 horizontal-stretch: 1;
@@ -950,17 +1340,31 @@ export component ZalenderView inherits Rectangle {
                                 background: root.shade-weekends && cell.is-weekend ? Theme.weekend-fill : Theme.bg;
                                 border-width: 1px;
                                 border-color: Theme.stroke;
+                                TouchArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    clicked => {
+                                        if cell.date-key != "" {
+                                            root.open-create-event(cell.date-key, 0, true);
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 100%;
+                                        height: 100%;
+                                        background: parent.pressed ? Theme.surface-press : transparent;
+                                    }
+                                }
                                 VerticalLayout {
                                     padding: 2px;
                                     spacing: 2px;
                                     alignment: start;
-                                    for e in cell.events: TouchArea {
-                                        min-width: 0px;
-                                        preferred-width: 0px;
-                                        horizontal-stretch: 1;
-                                        visible: e.all-day && e.slot-ord < ad-limit;
-                                        clicked => { root.open-event-uid(cell.date-key, e.uid); }
-                                        VerticalLayout {
+                                    for e in cell.events: VerticalLayout {
+                                        spacing: 0px;
+                                        if e.all-day: TouchArea {
+                                            min-width: 0px;
+                                            preferred-width: 0px;
+                                            horizontal-stretch: 1;
+                                            clicked => { root.open-event-uid(cell.date-key, e.uid); }
                                             EventChip {
                                                 title: e.title;
                                                 title-lines: root.title-lines;
@@ -968,18 +1372,12 @@ export component ZalenderView inherits Rectangle {
                                                 event-color: e.color;
                                                 all-day: true;
                                                 show-time: false;
-                                                compact: true;
+                                                compact: !root.show-event-time;
                                                 min-width: 0px;
                                                 preferred-width: 0px;
                                                 horizontal-stretch: 1;
                                             }
                                         }
-                                    }
-                                    if cell.all-day-count > ad-limit: Text {
-                                        text: "+" + (cell.all-day-count - ad-limit) + " more";
-                                        color: Theme.muted;
-                                        font-size: 10px;
-                                        font-weight: 500;
                                     }
                                 }
                             }
@@ -1004,9 +1402,10 @@ export component ZalenderView inherits Rectangle {
                                 for slot in root.hour-slots: Rectangle {
                                     height: 48px;
                                     Text {
+                                        font-family: Theme.font-family;
                                         text: slot.label;
                                         color: Theme.muted;
-                                        font-size: 10px;
+                                        font-size: 10px * Theme.font-scale;
                                         width: 100%;
                                         height: 100%;
                                         horizontal-alignment: right;
@@ -1044,7 +1443,7 @@ export component ZalenderView inherits Rectangle {
                                             height: 48px;
                                             clicked => {
                                                 if cell.date-key != "" {
-                                                    root.open-create-event(cell.date-key, slot.start-mins);
+                                                    root.open-create-event(cell.date-key, slot.start-mins, false);
                                                 }
                                             }
                                             Rectangle {
@@ -1081,6 +1480,7 @@ export component ZalenderView inherits Rectangle {
                                         }
                                     }
                                     for e in cell.events: Text {
+                                        font-family: Theme.font-family;
                                         visible: !e.all-day && e.slot-ord == 0 && e.slot-total > root.timed-max
                                             && e.start-mins >= root.grid-start && e.start-mins < root.grid-end;
                                         x: 6px;
@@ -1090,7 +1490,7 @@ export component ZalenderView inherits Rectangle {
                                         height: 16px;
                                         text: "+" + (e.slot-total - max(0, root.timed-max - 1)) + " more";
                                         color: Theme.muted;
-                                        font-size: 10px;
+                                        font-size: 10px * Theme.font-scale;
                                         font-weight: 500;
                                         vertical-alignment: center;
                                     }
@@ -1190,6 +1590,7 @@ export component ZalenderView inherits Rectangle {
                                 spacing: Theme.pad-sm;
                                 cross-axis-alignment: center;
                                 Text {
+                                    font-family: Theme.font-family;
                                     text: cell.label;
                                     color: Theme.text;
                                     font-size: Theme.font-body;
@@ -1197,6 +1598,7 @@ export component ZalenderView inherits Rectangle {
                                     horizontal-stretch: 1;
                                 }
                                 if cell.is-today: Text {
+                                    font-family: Theme.font-family;
                                     text: "Today";
                                     color: Theme.accent;
                                     font-size: Theme.font-caption;
@@ -1224,6 +1626,7 @@ export component ZalenderView inherits Rectangle {
                                     if cell.date-key != "" { root.select-date(cell.date-key); }
                                 }
                                 Text {
+                                    font-family: Theme.font-family;
                                     text: "Open day…";
                                     color: Theme.muted;
                                     font-size: Theme.font-caption;
@@ -1242,24 +1645,28 @@ export component ZalenderView inherits Rectangle {
         }
     }
 
-    // Day modal overlay (month/year) — all-day then hourly slots
-    if day-modal-open: TouchArea {
+    // One dim for whichever sheet is in front. Nested sheets reuse it.
+    if root.sheet-open && !root.hide-scrim: Rectangle {
+        width: 100%;
+        height: 100%;
+        z: root.sheet-scrim-z;
+        background: Theme.dim;
+    }
+
+    // Day modal (month/year): all-day block, then timed events, flush and only as tall as their rows.
+    if day-modal-open: day-scrim := TouchArea {
         width: 100%;
         height: 100%;
         z: 50;
         clicked => { root.close-day-modal(); }
-        Rectangle {
-            width: 100%;
-            height: 100%;
-            background: Theme.dim;
-        }
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             width: min(520px, parent.width - 48px);
-            height: min(640px, parent.height - 48px);
             clicked => { }
-            Rectangle {
+            day-sheet := Rectangle {
+                width: 100%;
+                max-height: day-scrim.height - 48px;
                 background: Theme.surface;
                 border-radius: Theme.radius;
                 border-width: 1px;
@@ -1267,128 +1674,66 @@ export component ZalenderView inherits Rectangle {
                 VerticalLayout {
                     padding: Theme.pad;
                     spacing: Theme.pad-sm;
-                    Text {
+                    day-title := Text {
+                        font-family: Theme.font-family;
                         text: root.day-modal-title;
                         color: Theme.text;
                         font-size: Theme.font-title;
                         font-weight: 700;
+                        wrap: word-wrap;
+                        width: 100%;
                     }
-                    Flickable {
-                        vertical-stretch: 1;
-                        content-width: parent.width;
-                        VerticalLayout {
-                            spacing: Theme.pad-sm;
-                            Text {
-                                text: "All day";
-                                color: Theme.muted;
-                                font-size: Theme.font-caption;
-                                font-weight: 600;
-                            }
-                            for e[ei] in day-events: TouchArea {
-                                visible: e.all-day;
-                                min-height: Theme.touch-min;
-                                clicked => { root.open-event(ei); }
-                                Rectangle {
-                                    background: parent.pressed ? Theme.surface-press : Theme.surface-2;
-                                    border-radius: Theme.radius;
-                                    HorizontalLayout {
-                                        padding: Theme.pad-sm;
-                                        spacing: Theme.pad-sm;
-                                        Rectangle {
-                                            width: 6px;
-                                            height: 100%;
-                                            background: e.color;
-                                            border-radius: 3px;
-                                        }
-                                        VerticalLayout {
-                                            spacing: 2px;
-                                            horizontal-stretch: 1;
-                                            Text {
-                                                text: e.title;
-                                                color: Theme.text;
-                                                font-size: Theme.font-body;
-                                            }
-                                            if e.calendar != "": Text {
-                                                text: e.calendar;
-                                                color: Theme.muted;
-                                                font-size: Theme.font-caption;
-                                            }
-                                        }
-                                        if e.icon != "": EventIcon {
-                                            id: e.icon;
-                                            size: Theme.font-body;
-                                            tone: e.color;
-                                        }
+                    day-scroll := Flickable {
+                        property <length> list-w: min(520px, day-scrim.width - 48px) - Theme.pad * 2;
+                        property <length> chrome: day-title.preferred-height + day-actions.preferred-height + Theme.pad * 2 + Theme.pad-sm * 2;
+                        property <length> limit: max(0px, day-sheet.max-height - chrome);
+                        // Content height until the sheet would leave the screen, then this region scrolls.
+                        height: min(day-list.preferred-height, limit);
+                        vertical-stretch: 0;
+                        content-width: list-w;
+                        content-height: day-list.preferred-height;
+                        day-list := VerticalLayout {
+                            spacing: 0px;
+                            width: day-scroll.list-w;
+                            if root.modal-has-all-day: VerticalLayout {
+                                spacing: 0px;
+                                width: day-scroll.list-w;
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: "All day";
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                    font-weight: 600;
+                                    height: self.preferred-height + 4px;
+                                    vertical-alignment: top;
+                                }
+                                for e[ei] in day-events: VerticalLayout {
+                                    if e.all-day: DayModalRow {
+                                        title: e.title;
+                                        calendar: e.calendar;
+                                        event-color: e.color;
+                                        icon: e.icon;
+                                        clicked => { root.open-event(ei); }
                                     }
                                 }
                             }
-                            Rectangle { height: 1px; background: Theme.surface-press; }
-                            for slot in root.day-hour-buckets: VerticalLayout {
-                                spacing: 4px;
-                                HorizontalLayout {
-                                    spacing: Theme.pad-sm;
-                                    Text {
-                                        text: slot.label;
-                                        color: Theme.muted;
-                                        font-size: Theme.font-caption;
-                                        font-weight: 600;
-                                        min-width: 64px;
-                                        vertical-alignment: top;
-                                    }
-                                    VerticalLayout {
-                                        spacing: 4px;
-                                        horizontal-stretch: 1;
-                                        for e[ei] in day-events: TouchArea {
-                                            visible: !e.all-day
-                                                && e.start-mins >= slot.start-mins
-                                                && e.start-mins < slot.end-mins;
-                                            min-height: Theme.touch-min;
-                                            clicked => { root.open-event(ei); }
-                                            Rectangle {
-                                                background: parent.pressed ? Theme.surface-press : Theme.surface-2;
-                                                border-radius: Theme.radius;
-                                                HorizontalLayout {
-                                                    padding: Theme.pad-sm;
-                                                    spacing: Theme.pad-sm;
-                                                    Rectangle {
-                                                        width: 6px;
-                                                        height: 100%;
-                                                        background: e.color;
-                                                        border-radius: 3px;
-                                                    }
-                                                    VerticalLayout {
-                                                        spacing: 2px;
-                                                        horizontal-stretch: 1;
-                                                        Text {
-                                                            text: e.time;
-                                                            color: Theme.muted;
-                                                            font-size: Theme.font-caption;
-                                                        }
-                                                        Text {
-                                                            text: e.title;
-                                                            color: Theme.text;
-                                                            font-size: Theme.font-body;
-                                                        }
-                                                        if e.calendar != "": Text {
-                                                            text: e.calendar;
-                                                            color: Theme.muted;
-                                                            font-size: Theme.font-caption;
-                                                        }
-                                                    }
-                                                    if e.icon != "": EventIcon {
-                                                        id: e.icon;
-                                                        size: Theme.font-body;
-                                                        tone: e.color;
-                                                    }
-                                                }
-                                            }
-                                        }
+                            if root.modal-has-timed: VerticalLayout {
+                                spacing: 0px;
+                                width: day-scroll.list-w;
+                                for e[ei] in day-events: VerticalLayout {
+                                    if !e.all-day: DayModalRow {
+                                        title: e.title;
+                                        time: e.time;
+                                        calendar: e.calendar;
+                                        event-color: e.color;
+                                        icon: e.icon;
+                                        clicked => { root.open-event(ei); }
                                     }
                                 }
                             }
                         }
                     }
-                    HorizontalLayout {
+                    day-actions := HorizontalLayout {
                         spacing: Theme.pad-sm;
                         alignment: end;
                         Button {
@@ -1396,7 +1741,7 @@ export component ZalenderView inherits Rectangle {
                             role: "primary";
                             activate => {
                                 if root.selected-date-key != "" {
-                                    root.open-create-event(root.selected-date-key, 9 * 60);
+                                    root.open-create-event(root.selected-date-key, 9 * 60, false);
                                 }
                             }
                         }
@@ -1417,11 +1762,6 @@ export component ZalenderView inherits Rectangle {
         height: 100%;
         z: 90;
         clicked => { }
-        Rectangle {
-            width: 100%;
-            height: 100%;
-            background: Theme.dim;
-        }
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -1434,6 +1774,7 @@ export component ZalenderView inherits Rectangle {
                     padding: Theme.pad-sm;
                     spacing: Theme.pad-sm;
                     Text {
+                        font-family: Theme.font-family;
                         text: "Name your local calendar";
                         color: Theme.text;
                         font-size: Theme.font-title;
@@ -1442,6 +1783,7 @@ export component ZalenderView inherits Rectangle {
                         width: 100%;
                     }
                     Text {
+                        font-family: Theme.font-family;
                         text: "On this device only. Default for new events.";
                         color: Theme.muted;
                         font-size: Theme.font-caption;
@@ -1463,14 +1805,24 @@ export component ZalenderView inherits Rectangle {
                                 if TextEditActions.action == 4 { name-input.select-all(); }
                             }
                         }
+                        TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            clicked => { name-input.focus(); }
+                        }
                         HorizontalLayout {
+                            width: 100%;
+                            height: 100%;
                             padding-left: Theme.pad-sm;
                             padding-right: Theme.pad-sm;
+                            alignment: stretch;
                             name-input := TextInput {
+                                font-family: Theme.font-family;
                                 text <=> root.name-local-draft;
                                 color: Theme.text;
                                 font-size: Theme.font-body;
                                 single-line: true;
+                                horizontal-alignment: left;
                                 vertical-alignment: center;
                                 horizontal-stretch: 1;
                                 vertical-stretch: 1;
@@ -1498,95 +1850,176 @@ export component ZalenderView inherits Rectangle {
         height: 100%;
         z: 70;
         clicked => { root.close-create-event(); }
-        Rectangle {
-            width: 100%;
-            height: 100%;
-            background: Theme.dim;
-        }
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: min(440px, parent.width - 48px);
+            // Wide enough for date and the two times on one row. Tall enough that
+            // the fields fit the 800px window without a scroller.
+            width: min(860px, parent.width - 48px);
+            height: min(560px, parent.height - 48px);
             clicked => { }
             Rectangle {
+                width: 100%;
+                height: 100%;
                 background: Theme.surface;
                 border-radius: Theme.radius;
                 VerticalLayout {
+                    width: 100%;
+                    height: 100%;
                     padding: Theme.pad;
-                    spacing: Theme.pad;
-                    Text {
-                        text: "New event";
-                        color: Theme.text;
-                        font-size: Theme.font-title;
-                        font-weight: 700;
-                    }
-                    Text {
-                        text: root.create-date-label;
-                        color: Theme.muted;
-                        font-size: Theme.font-body;
+                    spacing: Theme.pad-sm;
+                    HorizontalLayout {
+                        spacing: Theme.pad-sm;
+                        alignment: stretch;
+                        cross-axis-alignment: center;
+                        Text {
+                            font-family: Theme.font-family;
+                            text: "New event";
+                            color: Theme.text;
+                            font-size: Theme.font-title;
+                            font-weight: 700;
+                            horizontal-stretch: 0;
+                        }
+                        Text {
+                            font-family: Theme.font-family;
+                            text: root.create-calendar-name + " (Local)";
+                            color: Theme.muted;
+                            font-size: Theme.font-caption;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            min-width: 0px;
+                        }
                     }
                     Field {
                         caption: "Title";
-                        tip: "Saved to your local calendar.";
+                        min-width: 0px;
                         text <=> root.create-title;
                         edited => { root.create-set-title(root.create-title); }
                     }
-                    Text {
-                        text: "Calendar: " + root.create-calendar-name + " (Local)";
-                        color: Theme.muted;
-                        font-size: Theme.font-caption;
-                    }
-                    Switch {
-                        label: "All day";
-                        checked: root.create-all-day;
-                        tip: "All-day events sit in the all-day row.";
-                        toggled => { root.create-set-all-day(!root.create-all-day); }
-                    }
-                    if !root.create-all-day: HorizontalLayout {
-                        spacing: Theme.pad-sm;
+                    HorizontalLayout {
+                        spacing: Theme.pad;
                         alignment: stretch;
                         cross-axis-alignment: center;
-                        Text {
-                            text: "Start " + root.create-start-label;
-                            color: Theme.text;
-                            font-size: Theme.font-body;
+                        Stepper {
                             horizontal-stretch: 1;
+                            caption: "Date";
+                            value: root.create-date-label;
+                            dec => { root.create-shift-date(-1); }
+                            inc => { root.create-shift-date(1); }
                         }
-                        Button {
-                            label: "−";
-                            role: "secondary";
-                            square: true;
-                            activate => { root.create-set-start-mins(root.create-start-mins - 30); }
-                        }
-                        Button {
-                            label: "+";
-                            role: "secondary";
-                            square: true;
-                            activate => { root.create-set-start-mins(root.create-start-mins + 30); }
+                        TouchArea {
+                            horizontal-stretch: 0;
+                            min-height: Theme.touch-min;
+                            clicked => { root.create-set-all-day(!root.create-all-day); }
+                            Rectangle {
+                                background: parent.pressed ? Theme.surface-press : transparent;
+                                border-radius: Theme.radius;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 10px;
+                                    spacing: 8px;
+                                    alignment: start;
+                                    cross-axis-alignment: center;
+                                    Rectangle {
+                                        width: 22px;
+                                        height: 22px;
+                                        vertical-stretch: 0;
+                                        border-radius: 3px;
+                                        border-width: 2px;
+                                        border-color: root.create-all-day ? Theme.accent : Theme.muted;
+                                        background: root.create-all-day ? Theme.accent : transparent;
+                                        if root.create-all-day: FaIcon {
+                                            glyph: Icons.check;
+                                            size: 12px;
+                                            tone: Theme.text-on-accent;
+                                            width: 100%;
+                                            height: 100%;
+                                        }
+                                    }
+                                    Text {
+                                        font-family: Theme.font-family;
+                                        text: "All day";
+                                        color: Theme.text;
+                                        font-size: Theme.font-body;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                         }
                     }
                     if !root.create-all-day: HorizontalLayout {
-                        spacing: Theme.pad-sm;
+                        spacing: Theme.pad;
                         alignment: stretch;
-                        cross-axis-alignment: center;
-                        Text {
-                            text: "End " + root.create-end-label;
-                            color: Theme.text;
-                            font-size: Theme.font-body;
+                        Stepper {
                             horizontal-stretch: 1;
+                            caption: "Starts";
+                            value: root.create-start-label;
+                            dec => { root.create-set-start-mins(root.create-start-mins - 30); }
+                            inc => { root.create-set-start-mins(root.create-start-mins + 30); }
                         }
-                        Button {
-                            label: "−";
-                            role: "secondary";
-                            square: true;
-                            activate => { root.create-set-end-mins(root.create-end-mins - 30); }
+                        Stepper {
+                            horizontal-stretch: 1;
+                            caption: "Ends";
+                            value: root.create-end-label;
+                            dec => { root.create-set-end-mins(root.create-end-mins - 30); }
+                            inc => { root.create-set-end-mins(root.create-end-mins + 30); }
                         }
-                        Button {
-                            label: "+";
-                            role: "secondary";
-                            square: true;
-                            activate => { root.create-set-end-mins(root.create-end-mins + 30); }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.pad;
+                        alignment: stretch;
+                        Field {
+                            caption: "Location";
+                            horizontal-stretch: 1;
+                            min-width: 0px;
+                            text <=> root.create-location;
+                            edited => { root.create-set-location(root.create-location); }
                         }
+                        VerticalLayout {
+                            spacing: 4px;
+                            horizontal-stretch: 1;
+                            min-width: 0px;
+                            Text {
+                                font-family: Theme.font-family;
+                                text: "Repeat";
+                                color: Theme.muted;
+                                font-size: Theme.font-caption;
+                            }
+                            TouchArea {
+                                clicked => { root.create-open-repeat(); }
+                                Rectangle {
+                                    min-height: Theme.touch-min;
+                                    background: root.create-repeat ? Theme.accent : Theme.surface-2;
+                                    border-radius: Theme.radius;
+                                    HorizontalLayout {
+                                        padding-left: Theme.pad-sm;
+                                        padding-right: Theme.pad-sm;
+                                        spacing: Theme.pad-sm;
+                                        alignment: stretch;
+                                        cross-axis-alignment: center;
+                                        Text {
+                                            font-family: Theme.font-family;
+                                            text: root.create-repeat ? root.create-repeat-summary : "Off";
+                                            color: root.create-repeat ? Theme.text-on-accent : Theme.text;
+                                            font-size: Theme.font-body;
+                                            horizontal-stretch: 1;
+                                            overflow: elide;
+                                            min-width: 0px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    LongField {
+                        caption: "Description";
+                        vertical-stretch: 1;
+                        min-width: 0px;
+                        text <=> root.create-description;
+                        edited => { root.create-set-description(root.create-description); }
                     }
                     HorizontalLayout {
                         spacing: Theme.pad-sm;
@@ -1607,13 +2040,216 @@ export component ZalenderView inherits Rectangle {
         }
     }
 
+    if create-repeat-open: TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 85;
+        clicked => { root.create-close-repeat(); }
+        TouchArea {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(640px, parent.width - 48px);
+            height: min(560px, parent.height - 48px);
+            clicked => { }
+            Rectangle {
+                width: 100%;
+                height: 100%;
+                background: Theme.surface;
+                border-radius: Theme.radius;
+                VerticalLayout {
+                    width: 100%;
+                    height: 100%;
+                    padding: Theme.pad;
+                    spacing: Theme.pad-sm;
+                    Text {
+                        font-family: Theme.font-family;
+                        text: "Repeat";
+                        color: Theme.text;
+                        font-size: Theme.font-title;
+                        font-weight: 700;
+                    }
+                    Flickable {
+                        vertical-stretch: 1;
+                        horizontal-stretch: 1;
+                        content-width: self.width;
+                        VerticalLayout {
+                            spacing: Theme.pad-sm;
+                            width: parent.width;
+                            HorizontalLayout {
+                                spacing: Theme.pad-sm;
+                                alignment: stretch;
+                                cross-axis-alignment: center;
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: "Repeat every";
+                                    color: Theme.text;
+                                    font-size: Theme.font-body;
+                                }
+                                Button {
+                                    label: "−";
+                                    role: "secondary";
+                                    square: true;
+                                    activate => { root.create-set-repeat-interval(root.create-repeat-interval - 1); }
+                                }
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: "" + root.create-repeat-interval;
+                                    color: Theme.text;
+                                    font-size: Theme.font-body;
+                                    font-weight: 700;
+                                    min-width: 28px;
+                                    horizontal-alignment: center;
+                                }
+                                Button {
+                                    label: "+";
+                                    role: "secondary";
+                                    square: true;
+                                    activate => { root.create-set-repeat-interval(root.create-repeat-interval + 1); }
+                                }
+                                Dropdown {
+                                    horizontal-stretch: 1;
+                                    options: root.create-repeat-units;
+                                    selected: root.create-repeat-unit;
+                                    changed(i) => { root.create-set-repeat-unit(i); }
+                                }
+                            }
+                            if root.create-repeat-unit == 1: Text {
+                                font-family: Theme.font-family;
+                                text: "On";
+                                color: Theme.muted;
+                                font-size: Theme.font-caption;
+                            }
+                            if root.create-repeat-unit == 1: HorizontalLayout {
+                                spacing: 2px;
+                                alignment: center;
+                                for day in root.create-weekdays: DayDot {
+                                    letter: day.letter;
+                                    on: day.on;
+                                    clicked => { root.create-toggle-weekday(day.index); }
+                                }
+                            }
+                            if root.create-repeat-unit == 2: ChoiceRow {
+                                label: root.create-month-dom-label;
+                                selected: !root.create-by-weekday;
+                                clicked => { root.create-set-by-weekday(false); }
+                            }
+                            if root.create-repeat-unit == 2: ChoiceRow {
+                                label: root.create-month-nth-label;
+                                selected: root.create-by-weekday;
+                                clicked => { root.create-set-by-weekday(true); }
+                            }
+                            if root.create-repeat-unit == 3: ChoiceRow {
+                                label: root.create-quarter-dom-label;
+                                selected: !root.create-by-weekday;
+                                clicked => { root.create-set-by-weekday(false); }
+                            }
+                            if root.create-repeat-unit == 3: ChoiceRow {
+                                label: root.create-quarter-nth-label;
+                                selected: root.create-by-weekday;
+                                clicked => { root.create-set-by-weekday(true); }
+                            }
+                            Text {
+                                font-family: Theme.font-family;
+                                text: "Ends";
+                                color: Theme.muted;
+                                font-size: Theme.font-caption;
+                            }
+                            HorizontalLayout {
+                                spacing: Theme.pad-sm;
+                                Button {
+                                    label: "Never";
+                                    role: root.create-repeat-end == 0 ? "primary" : "secondary";
+                                    activate => { root.create-set-repeat-end(0); }
+                                }
+                                Button {
+                                    label: "On";
+                                    role: root.create-repeat-end == 1 ? "primary" : "secondary";
+                                    activate => { root.create-set-repeat-end(1); }
+                                }
+                                Button {
+                                    label: "After";
+                                    role: root.create-repeat-end == 2 ? "primary" : "secondary";
+                                    activate => { root.create-set-repeat-end(2); }
+                                }
+                            }
+                            if root.create-repeat-end == 1: Stepper {
+                                caption: "Ends on";
+                                value: root.create-until-label;
+                                dec => { root.create-shift-until(-1); }
+                                inc => { root.create-shift-until(1); }
+                            }
+                            if root.create-repeat-end == 2: HorizontalLayout {
+                                spacing: Theme.pad-sm;
+                                alignment: start;
+                                cross-axis-alignment: center;
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: "Ends after";
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                }
+                                Button {
+                                    label: "−";
+                                    role: "secondary";
+                                    square: true;
+                                    activate => { root.create-set-repeat-count(root.create-repeat-count - 1); }
+                                }
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: "" + root.create-repeat-count;
+                                    color: Theme.text;
+                                    font-size: Theme.font-body;
+                                    font-weight: 700;
+                                    min-width: 32px;
+                                    horizontal-alignment: center;
+                                }
+                                Button {
+                                    label: "+";
+                                    role: "secondary";
+                                    square: true;
+                                    activate => { root.create-set-repeat-count(root.create-repeat-count + 1); }
+                                }
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: "occurrences";
+                                    color: Theme.text;
+                                    font-size: Theme.font-body;
+                                }
+                            }
+                            Text {
+                                font-family: Theme.font-family;
+                                text: root.create-repeat-summary;
+                                color: Theme.muted;
+                                font-size: Theme.font-caption;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.pad-sm;
+                        alignment: end;
+                        Button {
+                            label: "Don't repeat";
+                            role: "secondary";
+                            activate => { root.create-clear-repeat(); }
+                        }
+                        Button {
+                            label: "Done";
+                            role: "primary";
+                            activate => { root.create-close-repeat(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Event detail
     if event-detail-open: TouchArea {
         width: 100%;
         height: 100%;
         z: 60;
         clicked => { root.close-event-detail(); }
-        Rectangle { width: 100%; height: 100%; background: Theme.dim; }
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -1627,6 +2263,7 @@ export component ZalenderView inherits Rectangle {
                     padding: Theme.pad;
                     spacing: Theme.pad;
                     Text {
+                        font-family: Theme.font-family;
                         text: detail-event.title;
                         color: Theme.text;
                         font-size: Theme.font-title;
@@ -1634,22 +2271,33 @@ export component ZalenderView inherits Rectangle {
                         wrap: word-wrap;
                     }
                     Text {
+                        font-family: Theme.font-family;
                         text: detail-event.time;
                         color: Theme.muted;
                         font-size: Theme.font-body;
                     }
                     Text {
+                        font-family: Theme.font-family;
                         text: detail-event.calendar;
                         color: Theme.muted;
                         font-size: Theme.font-caption;
                     }
+                    if detail-event.location != "": Text {
+                        font-family: Theme.font-family;
+                        text: detail-event.location;
+                        color: Theme.text;
+                        font-size: Theme.font-body;
+                        wrap: word-wrap;
+                    }
                     if detail-event.description != "": Text {
+                        font-family: Theme.font-family;
                         text: detail-event.description;
                         color: Theme.text;
                         font-size: Theme.font-body;
                         wrap: word-wrap;
                     }
                     if detail-custom-summary != "": Text {
+                        font-family: Theme.font-family;
                         text: detail-custom-summary;
                         color: Theme.muted;
                         font-size: Theme.font-caption;
@@ -1677,6 +2325,7 @@ export component ZalenderView inherits Rectangle {
                             }
                         }
                         if !detail-event.writable: Text {
+                            font-family: Theme.font-family;
                             text: "Edit is unavailable — this feed is read-only.";
                             color: Theme.muted;
                             font-size: Theme.font-caption;
@@ -1693,7 +2342,6 @@ export component ZalenderView inherits Rectangle {
         height: 100%;
         z: 70;
         clicked => { root.close-customize(); }
-        Rectangle { width: 100%; height: 100%; background: Theme.dim; }
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -1707,6 +2355,7 @@ export component ZalenderView inherits Rectangle {
                     padding: Theme.pad;
                     spacing: Theme.pad-sm;
                     Text {
+                        font-family: Theme.font-family;
                         text: "Customize";
                         color: Theme.text;
                         font-size: Theme.font-title;
@@ -1725,12 +2374,12 @@ export component ZalenderView inherits Rectangle {
                             activate => { root.customize-set-occurrence(false); }
                         }
                     }
-                    Text { text: "Color"; color: Theme.muted; font-size: Theme.font-caption; }
+                    Text { font-family: Theme.font-family; text: "Color"; color: Theme.muted; font-size: Theme.font-caption; }
                     ColorBox {
                         value: root.customize-color;
                         picked(hex) => { root.customize-set-color(hex); }
                     }
-                    Text { text: "Icon"; color: Theme.muted; font-size: Theme.font-caption; }
+                    Text { font-family: Theme.font-family; text: "Icon"; color: Theme.muted; font-size: Theme.font-caption; }
                     HorizontalLayout {
                         spacing: 6px;
                         for ic in ["", "dot", "star", "flag", "bell", "pin"]: TouchArea {
@@ -1752,35 +2401,52 @@ export component ZalenderView inherits Rectangle {
                     }
                     Flickable {
                         vertical-stretch: 1;
-                        content-width: parent.width;
-                        VerticalLayout {
+                        min-width: 0px;
+                        // Viewport width, not the text's preferred width. Otherwise every
+                        // field grows with its string and the sheet clips them on one edge.
+                        content-width: self.width;
+                        content-height: fields-col.preferred-height;
+                        fields-col := VerticalLayout {
                             spacing: Theme.pad-sm;
+                            width: parent.width;
+                            min-width: 0px;
                             for f in customize-fields: VerticalLayout {
                                 spacing: 4px;
+                                width: 100%;
+                                min-width: 0px;
                                 Text {
+                                    font-family: Theme.font-family;
                                     text: f.name;
                                     color: Theme.muted;
                                     font-size: Theme.font-caption;
+                                    width: 100%;
+                                    min-width: 0px;
+                                    wrap: word-wrap;
                                 }
-                                if f.field-type == 2: TouchArea {
-                                    min-height: Theme.touch-min;
-                                    clicked => {
-                                        root.customize-set-field(f.id, f.value == "true" ? "false" : "true");
-                                    }
-                                    Rectangle {
-                                        background: Theme.surface-2;
-                                        border-radius: Theme.radius;
-                                        Text {
-                                            text: f.value == "true" ? "Yes" : "No";
-                                            color: Theme.text;
-                                            vertical-alignment: center;
-                                            horizontal-alignment: center;
-                                            width: 100%; height: 100%;
-                                        }
+                                if f.field-type == 2: Switch {
+                                    checked: f.value == "true";
+                                    toggled => {
+                                        root.customize-set-field(f.id, self.checked ? "true" : "false");
                                     }
                                 }
-                                if f.field-type != 2: Rectangle {
-                                    min-height: f.field-type == 1 ? 80px : Theme.touch-min;
+                                if f.field-type == 3: ChoiceDropdown {
+                                    value: f.value;
+                                    field-id: f.id;
+                                    option-count: f.option-count;
+                                    has-blank: f.has-blank;
+                                    options: root.customize-choices;
+                                    picked(id, v) => { root.customize-set-field(id, v); }
+                                }
+                                if f.field-type == 0 || f.field-type == 1: Rectangle {
+                                    min-width: 0px;
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 0;
+                                    clip: true;
+                                    // Short text is one row. Long text is at least three lines
+                                    // and grows so wrapped text is not clipped.
+                                    height: f.field-type == 1
+                                        ? max(line-h * 3 + 16px, custom-field-input.preferred-height + 16px)
+                                        : max(Theme.touch-min, custom-field-input.preferred-height + 16px);
                                     background: Theme.surface-2;
                                     border-radius: Theme.radius;
                                     property <int> edit-token: TextEditActions.token;
@@ -1792,14 +2458,26 @@ export component ZalenderView inherits Rectangle {
                                             if TextEditActions.action == 4 { custom-field-input.select-all(); }
                                         }
                                     }
+                                    TouchArea {
+                                        width: 100%;
+                                        height: 100%;
+                                        clicked => { custom-field-input.focus(); }
+                                    }
                                     HorizontalLayout {
+                                        width: 100%;
+                                        height: 100%;
                                         padding: 8px;
+                                        alignment: stretch;
                                         custom-field-input := TextInput {
+                                            font-family: Theme.font-family;
                                             text: f.value;
                                             color: Theme.text;
                                             font-size: Theme.font-body;
-                                            single-line: f.field-type != 1;
+                                            min-width: 0px;
+                                            single-line: false;
                                             wrap: word-wrap;
+                                            horizontal-alignment: left;
+                                            vertical-alignment: f.field-type == 1 ? top : center;
                                             edited => { root.customize-set-field(f.id, self.text); }
                                             horizontal-stretch: 1;
                                             vertical-stretch: 1;
@@ -1832,7 +2510,6 @@ export component ZalenderView inherits Rectangle {
         height: 100%;
         z: 80;
         clicked => { root.close-edit-placeholder(); }
-        Rectangle { width: 100%; height: 100%; background: Theme.dim; }
         Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -1844,12 +2521,14 @@ export component ZalenderView inherits Rectangle {
                 padding: Theme.pad;
                 spacing: Theme.pad;
                 Text {
+                    font-family: Theme.font-family;
                     text: "Edit event";
                     color: Theme.text;
                     font-size: Theme.font-title;
                     font-weight: 700;
                 }
                 Text {
+                    font-family: Theme.font-family;
                     text: "Editing this calendar is not connected yet.";
                     color: Theme.muted;
                     font-size: Theme.font-body;

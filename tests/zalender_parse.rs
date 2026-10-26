@@ -28,6 +28,8 @@ fn snapshot_indexes_days() {
         feed_name: "f".into(),
         color: "#3b82f6".into(),
         description: String::new(),
+        location: String::new(),
+        rrule: None,
     }];
     let from = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
     let to = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
@@ -59,6 +61,8 @@ fn month_grid_and_snapshot_survive_concurrent_refresh() {
                 feed_name: "f".into(),
                 color: "#3b82f6".into(),
                 description: String::new(),
+                location: String::new(),
+                rrule: None,
             })
             .collect();
         Arc::new(model::CalendarSnapshot::from_events(events, from, to))
