@@ -1,0 +1,5 @@
+{
+  "version": "0.4.0",
+  "notes": "### Added\n\n- Bundled UI fonts (Nunito, Libre Baskerville, IBM Plex Mono, Playfair Display, Oswald, Caveat, Bungee) so the font choice looks the same on every device\n- Separate event font size for calendar titles and times (config schema 8; existing font size is copied onto events)\n- Repeating local events: day, week, month, quarter, or year, ending never, on a date, or after a count\n- Event location on local events and from ICS feeds",
+  "published": "2026-10-26"
+}
