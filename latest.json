@@ -1,0 +1,5 @@
+{
+  "version": "0.5.0",
+  "notes": "### Added\n\n- Dark and Light each keep their last palette; switching restores that mode\u2019s colors (config schema 10)\n- Theme randomize with a coherence slider: 100% stays a harmonized Dark or Light palette, 0% picks independent colors\n- Event card shows the ICS organizer and attendees\n- Multi-day all-day events draw as one bar across the day strip, with square ends when the event continues outside the visible range\n- Sidebar clock shows the date and time on separate lines\n\n### Changed\n\n- Calendar preset Reset and Delete share one column so the pills stay aligned\n- Day-list field settings no longer imply they also control the event card\n- Local event saves write off the UI thread",
+  "published": "2026-11-02"
+}
