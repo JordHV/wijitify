@@ -10,6 +10,10 @@ use crate::services::storage::{self, write_atomic};
 use super::model::{CalEvent, CalendarSnapshot};
 use super::recur::expand_rrule;
 
+/// Hard cap on decompressed ICS body size (gzip expands before this check).
+const MAX_ICS_BYTES: usize = 8 * 1024 * 1024;
+const MAX_REDIRECTS: usize = 10;
+
 #[derive(Debug, Clone)]
 pub struct FeedStatus {
     pub ok: bool,
@@ -32,6 +36,23 @@ pub async fn refresh_feeds(
     let client = reqwest::Client::builder()
         .user_agent(concat!("wijitify/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            // previous[0] is the original request URL.
+            if attempt.previous().len() > MAX_REDIRECTS {
+                return attempt.error("too many redirects");
+            }
+            let Some(initial) = attempt.previous().first() else {
+                return attempt.follow();
+            };
+            let next = attempt.url();
+            if next.scheme() != initial.scheme() {
+                return attempt.error("redirect changed scheme");
+            }
+            if next.host_str() != initial.host_str() {
+                return attempt.error("redirect changed host");
+            }
+            attempt.follow()
+        }))
         .build()?;
 
     let from = window_start
@@ -61,7 +82,12 @@ pub async fn refresh_feeds(
             }
             Err(e) => {
                 // Fall back to cache; never crash the UI path.
-                tracing::warn!("feed '{}' refresh failed: {e:#}", feed.name);
+                // Do not format the full error: reqwest Display embeds the URL (feed tokens).
+                tracing::warn!(
+                    "feed '{}' refresh failed ({})",
+                    feed.name,
+                    classify_feed_error(&e)
+                );
                 match load_feed_cache(cache_dir, feed, from, to) {
                     Ok(events) => {
                         all_events.extend(events);
@@ -184,7 +210,12 @@ async fn fetch_one(
         .get(reqwest::header::LAST_MODIFIED)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
-    let body = resp.text().await.context("read body")?;
+    if let Some(len) = resp.content_length() {
+        if len as usize > MAX_ICS_BYTES {
+            anyhow::bail!("ICS body exceeds {MAX_ICS_BYTES} bytes");
+        }
+    }
+    let body = read_body_limited(resp, MAX_ICS_BYTES).await?;
 
     write_atomic(&raw_path, body.as_bytes())?;
     let new_meta = FeedMeta {
@@ -213,6 +244,47 @@ fn load_feed_cache(
     let raw = storage::read_optional(&feed_raw_path(cache_dir, feed))?.context("no cached ics")?;
     let text = String::from_utf8(raw).context("ics utf-8")?;
     parse_ics(&text, feed, from, to)
+}
+
+/// Read a response body with a hard decompressed-size cap (gzip expands first).
+async fn read_body_limited(mut resp: reqwest::Response, max: usize) -> Result<String> {
+    let mut buf = Vec::new();
+    while let Some(chunk) = resp.chunk().await.context("read body")? {
+        if buf.len().saturating_add(chunk.len()) > max {
+            anyhow::bail!("ICS body exceeds {max} bytes");
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    String::from_utf8(buf).context("ics utf-8")
+}
+
+/// Map refresh errors to short labels that never include request URLs.
+fn classify_feed_error(e: &anyhow::Error) -> &'static str {
+    for c in e.chain() {
+        let s = c.to_string();
+        if s.contains("ICS body exceeds") {
+            return "body too large";
+        }
+        if s.contains("redirect changed") || s.contains("too many redirects") {
+            return "redirect rejected";
+        }
+        if s.contains("http status") {
+            return "bad status";
+        }
+        if s.contains("parse ics") {
+            return "parse";
+        }
+        if s.contains("read body") || s.contains("ics utf-8") {
+            return "read body";
+        }
+        if s.contains("http get") {
+            return "network";
+        }
+        if s.contains("no cached ics") {
+            return "no cache";
+        }
+    }
+    "error"
 }
 
 fn feed_key(feed: &FeedConfig) -> String {
@@ -254,6 +326,7 @@ pub fn parse_ics(
             .unwrap_or_else(|| format!("{}-{}", feed.id, title));
         let description = ev.get_description().unwrap_or("").to_string();
         let location = ev.property_value("LOCATION").unwrap_or("").to_string();
+        let (organizer, attendees) = event_people(ev);
 
         let Some(start_dpt) = ev.get_start() else {
             continue;
@@ -292,6 +365,8 @@ pub fn parse_ics(
                     color: feed.color.clone(),
                     description: description.clone(),
                     location: location.clone(),
+                    organizer: organizer.clone(),
+                    attendees: attendees.clone(),
                     rrule: None,
                 });
             }
@@ -308,6 +383,8 @@ pub fn parse_ics(
                 color: feed.color.clone(),
                 description,
                 location,
+                organizer,
+                attendees,
                 rrule: None,
             });
         }
@@ -362,6 +439,95 @@ fn map_tzid(tzid: &str) -> &str {
     }
 }
 
+fn event_people(ev: &icalendar::Event) -> (String, Vec<String>) {
+    let organizer_prop = find_prop(ev, "ORGANIZER");
+    let organizer = organizer_prop.map(person_name).unwrap_or_default();
+    let organizer_key = organizer_prop.map(person_key).unwrap_or_default();
+    let mut attendees = Vec::new();
+    for prop in find_multi(ev, "ATTENDEE") {
+        let name = person_name(prop);
+        if name.is_empty() {
+            continue;
+        }
+        let key = person_key(prop);
+        if !organizer_key.is_empty() && key.eq_ignore_ascii_case(&organizer_key) {
+            continue;
+        }
+        if organizer_key.is_empty() && name.eq_ignore_ascii_case(&organizer) {
+            continue;
+        }
+        attendees.push(name);
+    }
+    (organizer, attendees)
+}
+
+fn find_prop<'a>(ev: &'a icalendar::Event, key: &str) -> Option<&'a icalendar::Property> {
+    ev.properties()
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .map(|(_, v)| v)
+}
+
+fn find_multi<'a>(ev: &'a icalendar::Event, key: &str) -> &'a [icalendar::Property] {
+    ev.multi_properties()
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .map(|(_, v)| v.as_slice())
+        .unwrap_or(&[])
+}
+
+fn person_name(prop: &icalendar::Property) -> String {
+    if let Some(cn) = param_ci(prop, "CN") {
+        let cn = unescape_ics(cn);
+        if !cn.is_empty() {
+            return cn;
+        }
+    }
+    email_addr(prop.value())
+}
+
+fn person_key(prop: &icalendar::Property) -> String {
+    let email = email_addr(prop.value());
+    if !email.is_empty() {
+        return email.to_ascii_lowercase();
+    }
+    person_name(prop).to_ascii_lowercase()
+}
+
+fn param_ci<'a>(prop: &'a icalendar::Property, key: &str) -> Option<&'a str> {
+    prop.params()
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .map(|(_, p)| p.value())
+        .filter(|v| !v.is_empty())
+}
+
+fn email_addr(raw: &str) -> String {
+    let raw = raw.trim();
+    let addr = raw
+        .strip_prefix("mailto:")
+        .or_else(|| raw.strip_prefix("MAILTO:"))
+        .unwrap_or(raw);
+    unescape_ics(addr)
+}
+
+fn unescape_ics(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') | Some('N') => out.push('\n'),
+                Some(other) => out.push(other),
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out.trim().to_string()
+}
+
 fn collect_exdates(ev: &icalendar::Event) -> std::collections::HashSet<i64> {
     let mut set = std::collections::HashSet::new();
     if let Some(v) = ev.property_value("EXDATE") {
@@ -412,6 +578,16 @@ mod tests {
     }
 
     #[test]
+    fn classify_hides_url_shaped_messages() {
+        let e = anyhow::anyhow!("http get").context("wrapper");
+        assert_eq!(classify_feed_error(&e), "network");
+        let big = anyhow::anyhow!("ICS body exceeds 8 bytes");
+        assert_eq!(classify_feed_error(&big), "body too large");
+        let redir = anyhow::anyhow!("redirect changed host");
+        assert_eq!(classify_feed_error(&redir), "redirect rejected");
+    }
+
+    #[test]
     fn parse_google_style_all_day_date() {
         let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n\
             DTSTART;VALUE=DATE:20260119\r\nDTEND;VALUE=DATE:20260120\r\n\
@@ -432,5 +608,35 @@ mod tests {
         assert!(events[0].all_day);
         assert_eq!(events[0].title, "Martin Luther King Jr. Day");
         assert_eq!(events[0].color, "#ef4444");
+    }
+
+    #[test]
+    fn parse_organizer_and_attendees() {
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n\
+            DTSTART:20261101T150000Z\r\nDTEND:20261101T160000Z\r\n\
+            SUMMARY:Standup\r\nUID:stand@test\r\n\
+            ORGANIZER;CN=Ada Lovelace:mailto:ada@example.com\r\n\
+            ATTENDEE;CN=Ada Lovelace:mailto:ada@example.com\r\n\
+            ATTENDEE;CN=\"Grace Hopper\":mailto:grace@example.com\r\n\
+            ATTENDEE:mailto:noname@example.com\r\n\
+            END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let feed = FeedConfig {
+            id: "feed-1".into(),
+            name: "Work".into(),
+            url: "https://example.com/work.ics".into(),
+            color: "#3b82f6".into(),
+            visible: true,
+            writable: false,
+            local: false,
+        };
+        let from = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 11, 2, 0, 0, 0).unwrap();
+        let events = parse_ics(body, &feed, from, to).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].organizer, "Ada Lovelace");
+        assert_eq!(
+            events[0].attendees,
+            vec!["Grace Hopper".to_string(), "noname@example.com".to_string()]
+        );
     }
 }

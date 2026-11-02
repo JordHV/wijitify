@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-01
+
+### Added
+
+- Dark and Light each keep their last palette; switching restores that mode’s colors (config schema 10)
+- Theme randomize with a coherence slider: 100% stays a harmonized Dark or Light palette, 0% picks independent colors
+- Event card shows the ICS organizer and attendees
+- Multi-day all-day events draw as one bar across the day strip, with square ends when the event continues outside the visible range
+- Sidebar clock shows the date and time on separate lines
+
+### Changed
+
+- Calendar preset Reset and Delete share one column so the pills stay aligned
+- Day-list field settings no longer imply they also control the event card
+- Local event saves write off the UI thread
+
 ## [0.4.0] - 2026-10-25
 
 ### Added

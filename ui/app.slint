@@ -18,12 +18,12 @@ import {
 } from "./shell/settings.slint";
 import { SetupFlow, SetupModuleRow, FeedRow } from "./setup/setup.slint";
 import {
-    ZalenderView, DayCell, FeedChip, EventRow, CustomFieldRow, ChoiceOption, DayHourBucket, RepeatWeekday
+    ZalenderView, DayCell, FeedChip, EventRow, GuestRow, CustomFieldRow, ChoiceOption, DayHourBucket, RepeatWeekday
 } from "./modules/zalender/views.slint";
 
 export {
     Theme, ModuleToggleRow, SetupModuleRow, FeedRow, DayCell,
-    FeedChip, EventRow, CustomFieldRow, ChoiceOption, DayHourBucket, RepeatWeekday, SettingsFeedRow, SettingsFieldDefRow, ThemeColorRow,
+    FeedChip, EventRow, GuestRow, CustomFieldRow, ChoiceOption, DayHourBucket, RepeatWeekday, SettingsFeedRow, SettingsFieldDefRow, ThemeColorRow,
     SettingsPresetRow, WeekdayCheck
 }
 
@@ -40,7 +40,8 @@ export component AppWindow inherits Window {
     // 0 setup, 1 home (settings is overlay)
     in-out property <int> screen: 0;
     in-out property <string> active-module: "zalender";
-    in property <string> clock-text: "";
+    in property <string> clock-date: "";
+    in property <string> clock-time: "";
     in property <string> perf-overlay: "";
     in property <bool> settings-open: false;
 
@@ -65,6 +66,7 @@ export component AppWindow inherits Window {
     in property <[ThemeColorRow]> theme-colors;
     in property <string> theme-banner: "";
     in property <int> theme-banner-kind: 0;
+    in-out property <int> theme-random-coherence: 100;
     in property <[SettingsFeedRow]> settings-feeds;
     in property <string> settings-feed-banner: "";
     in property <int> settings-feed-banner-kind: 0;
@@ -192,6 +194,10 @@ export component AppWindow inherits Window {
     in property <string> zal-create-quarter-nth-label: "";
     in property <bool> zal-event-detail-open: false;
     in property <EventRow> zal-detail-event;
+    in property <string> zal-detail-date: "";
+    in property <[GuestRow]> zal-detail-guests;
+    in property <[GuestRow]> zal-detail-guest-row1;
+    in property <[GuestRow]> zal-detail-guest-row2;
     in property <string> zal-detail-custom-summary: "";
     in property <bool> zal-customize-open: false;
     in property <color> zal-customize-color: #3b82f6;
@@ -216,6 +222,8 @@ export component AppWindow inherits Window {
     callback settings-set-theme(int);
     callback settings-set-theme-color(int, string);
     callback settings-reset-theme-colors();
+    callback settings-randomize-theme();
+    callback settings-set-theme-random-coherence(int);
     callback settings-toggle-feed-visible(int);
     callback settings-remove-feed(int);
     callback settings-add-feed();
@@ -262,7 +270,6 @@ export component AppWindow inherits Window {
 
     callback zal-prev-period();
     callback zal-next-period();
-    callback zal-zoom-out();
     callback zal-go-today();
     callback zal-go-preset();
     callback zal-select-preset(int);
@@ -337,7 +344,8 @@ export component AppWindow inherits Window {
             if active-module == "zalender": ZalenderView {
                 width: 100%;
                 height: 100%;
-                clock-text: root.clock-text;
+                clock-date: root.clock-date;
+                clock-time: root.clock-time;
                 title-period: root.zal-title-period;
                 status-text: root.zal-status;
                 status-kind: root.zal-status-kind;
@@ -400,6 +408,10 @@ export component AppWindow inherits Window {
                 create-quarter-nth-label: root.zal-create-quarter-nth-label;
                 event-detail-open: root.zal-event-detail-open;
                 detail-event: root.zal-detail-event;
+                detail-date: root.zal-detail-date;
+                detail-guests: root.zal-detail-guests;
+                detail-guest-row1: root.zal-detail-guest-row1;
+                detail-guest-row2: root.zal-detail-guest-row2;
                 detail-custom-summary: root.zal-detail-custom-summary;
                 customize-open: root.zal-customize-open;
                 customize-color: root.zal-customize-color;
@@ -411,7 +423,6 @@ export component AppWindow inherits Window {
                 edit-placeholder-open: root.zal-edit-placeholder-open;
                 prev-period => { root.zal-prev-period(); }
                 next-period => { root.zal-next-period(); }
-                zoom-out => { root.zal-zoom-out(); }
                 go-today => { root.zal-go-today(); }
                 go-preset => { root.zal-go-preset(); }
                 select-preset(i) => { root.zal-select-preset(i); }
@@ -482,6 +493,7 @@ export component AppWindow inherits Window {
                 theme-colors: root.theme-colors;
                 theme-banner: root.theme-banner;
                 theme-banner-kind: root.theme-banner-kind;
+                theme-random-coherence <=> root.theme-random-coherence;
                 feeds: root.settings-feeds;
                 feed-banner: root.settings-feed-banner;
                 feed-banner-kind: root.settings-feed-banner-kind;
@@ -546,6 +558,8 @@ export component AppWindow inherits Window {
                 set-theme(i) => { root.settings-set-theme(i); }
                 set-theme-color(i, hex) => { root.settings-set-theme-color(i, hex); }
                 reset-theme-colors => { root.settings-reset-theme-colors(); }
+                randomize-theme => { root.settings-randomize-theme(); }
+                set-theme-random-coherence(v) => { root.settings-set-theme-random-coherence(v); }
                 toggle-feed-visible(i) => { root.settings-toggle-feed-visible(i); }
                 remove-feed(i) => { root.settings-remove-feed(i); }
                 add-feed => { root.settings-add-feed(); }

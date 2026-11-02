@@ -20,6 +20,41 @@ pub enum AddFeedOutcome {
     Err,
 }
 
+/// Validate and append an ICS feed. Shared by setup and settings.
+/// On success returns the feed name used; on failure returns a banner message.
+pub fn add_ics_feed(
+    z: &mut ZalenderConfig,
+    name: &str,
+    url: &str,
+    color: &str,
+) -> Result<String, String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err("Enter an ICS URL.".into());
+    }
+    let url = normalize_ics_url(url)
+        .map_err(|_| "URL must start with http:// or https://.".to_string())?;
+    let name = {
+        let n = name.trim();
+        if n.is_empty() {
+            host_from_url(&url).unwrap_or_else(|| "Calendar".into())
+        } else {
+            n.to_string()
+        }
+    };
+    let id = z.alloc_feed_id();
+    z.feeds.push(FeedConfig {
+        id,
+        name: name.clone(),
+        url,
+        color: color.to_string(),
+        visible: true,
+        writable: false,
+        local: false,
+    });
+    Ok(name)
+}
+
 impl SetupDraft {
     pub fn from_config(cfg: &Config, module_ids: &[(&str, &str, &str)]) -> Self {
         let selected = module_ids
@@ -50,45 +85,25 @@ impl SetupDraft {
     }
 
     pub fn add_feed(&mut self) -> AddFeedOutcome {
-        let mut name = self.new_feed_name.trim().to_string();
-        let url = self.new_feed_url.trim().to_string();
-        if url.is_empty() {
-            self.banner_message = "Enter an ICS URL.".into();
-            self.banner_kind = 3;
-            return AddFeedOutcome::Err;
-        }
-        let lower = url.to_ascii_lowercase();
-        if !(lower.starts_with("http://") || lower.starts_with("https://")) {
-            self.banner_message = "URL must start with http:// or https://.".into();
-            self.banner_kind = 3;
-            return AddFeedOutcome::Err;
-        }
-        let url = match normalize_ics_url(&url) {
-            Ok(u) => u,
-            Err(_) => {
-                self.banner_message = "URL must start with http:// or https://.".into();
-                self.banner_kind = 3;
-                return AddFeedOutcome::Err;
+        match add_ics_feed(
+            &mut self.zalender,
+            &self.new_feed_name,
+            &self.new_feed_url,
+            &self.new_feed_color,
+        ) {
+            Ok(name) => {
+                self.new_feed_name.clear();
+                self.new_feed_url.clear();
+                self.banner_message = format!("Added “{name}”.");
+                self.banner_kind = 1;
+                AddFeedOutcome::Added
             }
-        };
-        if name.is_empty() {
-            name = host_from_url(&url).unwrap_or_else(|| "Calendar".into());
+            Err(msg) => {
+                self.banner_message = msg;
+                self.banner_kind = 3;
+                AddFeedOutcome::Err
+            }
         }
-        let id = self.zalender.alloc_feed_id();
-        self.zalender.feeds.push(FeedConfig {
-            id,
-            name: name.clone(),
-            url,
-            color: self.new_feed_color.clone(),
-            visible: true,
-            writable: false,
-            local: false,
-        });
-        self.new_feed_name.clear();
-        self.new_feed_url.clear();
-        self.banner_message = format!("Added “{name}”.");
-        self.banner_kind = 1;
-        AddFeedOutcome::Added
     }
 
     pub fn remove_feed(&mut self, index: usize) {

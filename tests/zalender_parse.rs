@@ -29,6 +29,8 @@ fn snapshot_indexes_days() {
         color: "#3b82f6".into(),
         description: String::new(),
         location: String::new(),
+        organizer: String::new(),
+        attendees: Vec::new(),
         rrule: None,
     }];
     let from = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
@@ -62,6 +64,8 @@ fn month_grid_and_snapshot_survive_concurrent_refresh() {
                 color: "#3b82f6".into(),
                 description: String::new(),
                 location: String::new(),
+                organizer: String::new(),
+                attendees: Vec::new(),
                 rrule: None,
             })
             .collect();

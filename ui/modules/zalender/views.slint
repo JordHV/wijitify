@@ -13,37 +13,34 @@ component EventChip inherits Rectangle {
     in property <bool> all-day: false;
     in property <bool> show-time: false;
     in property <bool> compact: false;
-    /// Title wraps up to this many lines, then the last line ends with ….
+    /// Cap on wrapped title lines. The chip is only as tall as the text; the last line ends with … past the cap.
     in property <int> title-lines: 1;
+    /// Square that end when the bar continues into the neighboring column or week.
+    in property <bool> cont-left: false;
+    in property <bool> cont-right: false;
 
     property <int> lines: clamp(root.title-lines, 1, 10);
-    property <bool> multi: root.lines > 1;
+    property <length> time-size: root.compact ? Theme.font-event-time-compact : Theme.font-event-time;
+    property <length> cap-left: root.cont-left ? 0px : (root.compact ? 3px : 4px);
+    property <length> cap-right: root.cont-right ? 0px : (root.compact ? 3px : 4px);
 
     background: root.all-day ? root.event-color : Theme.surface-2;
-    border-radius: root.compact ? 3px : 4px;
+    border-top-left-radius: root.cap-left;
+    border-bottom-left-radius: root.cap-left;
+    border-top-right-radius: root.cap-right;
+    border-bottom-right-radius: root.cap-right;
+    vertical-stretch: 0;
+    min-height: body.preferred-height;
+    max-height: body.preferred-height;
 
-    line-probe := Text {
-        font-family: Theme.font-family;
-        width: 0px;
-        height: 0px;
-        opacity: 0;
-        accessible-role: none;
-        text: "Ag";
-        font-size: root.compact ? Theme.font-event-compact : Theme.font-event;
-        font-weight: 600;
-    }
-    property <length> title-block: line-probe.preferred-height * root.lines;
-    property <length> time-size: root.compact ? Theme.font-event-time-compact : Theme.font-event-time;
-    min-height: root.title-block + (root.show-time && root.time-text != "" ? root.time-size + 2px : 0px) + 4px;
-
-    HorizontalLayout {
+    body := HorizontalLayout {
         width: 100%;
         spacing: 0;
         if !root.all-day: Rectangle {
             width: Theme.event-bar;
             background: root.event-color;
-            border-top-left-radius: root.border-radius;
-            border-bottom-left-radius: root.border-radius;
+            border-top-left-radius: root.cap-left;
+            border-bottom-left-radius: root.cap-left;
             vertical-stretch: 1;
         }
         VerticalLayout {
@@ -59,13 +56,13 @@ component EventChip inherits Rectangle {
                 color: root.all-day ? Theme.text-on-accent : Theme.text;
                 font-size: root.compact ? Theme.font-event-compact : Theme.font-event;
                 font-weight: root.all-day || !root.compact ? 600 : 500;
-                wrap: root.multi ? word-wrap : no-wrap;
+                wrap: root.lines > 1 ? word-wrap : no-wrap;
                 overflow: elide;
                 max-lines: root.lines;
                 min-width: 0px;
                 horizontal-stretch: 1;
+                vertical-stretch: 0;
                 vertical-alignment: top;
-                min-height: root.title-block;
             }
             if root.show-time && root.time-text != "": Text {
                 font-family: Theme.font-family;
@@ -74,6 +71,7 @@ component EventChip inherits Rectangle {
                 font-size: root.time-size;
                 overflow: elide;
                 horizontal-stretch: 1;
+                vertical-stretch: 0;
             }
         }
     }
@@ -151,6 +149,59 @@ export struct EventRow {
     slot-ord: int,
     /// Size of the slot/all-day bucket this row belongs to (for +N more).
     slot-total: int,
+    /// Columns this all-day bar covers. 0 = continuation; the first day draws the bar.
+    span-cols: int,
+    /// Shared row across the day strip so a multi-day bar stays level.
+    span-lane: int,
+    /// Bar continues from before this strip (square left end).
+    cont-left: bool,
+    /// Bar continues past this strip (square right end).
+    cont-right: bool,
+    /// Lane of the previous event on this day, or -1. Used to show "+N more" once.
+    prev-lane: int,
+    /// Index of this event on its day when sorted by span-lane.
+    lane-order: int,
+}
+
+export struct GuestRow {
+    name: string,
+    organizer: bool,
+}
+
+/// Hairline between event-card sections.
+component SectionRule inherits Rectangle {
+    height: 1px;
+    vertical-stretch: 0;
+    background: Theme.stroke;
+    horizontal-stretch: 1;
+}
+
+/// One invitee in the event card. Organizer gets an italic label under the name.
+component GuestName inherits VerticalLayout {
+    in property <string> name: "";
+    in property <bool> organizer: false;
+
+    spacing: 0px;
+    min-width: 0px;
+    vertical-stretch: 0;
+
+    Text {
+        font-family: Theme.font-family;
+        text: root.name;
+        color: Theme.text;
+        font-size: Theme.font-caption;
+        overflow: elide;
+        width: 100%;
+    }
+    if root.organizer: Text {
+        font-family: Theme.font-family;
+        text: "organizer";
+        color: Theme.muted;
+        font-size: Theme.font-caption;
+        font-italic: true;
+        overflow: elide;
+        width: 100%;
+    }
 }
 
 export struct DayCell {
@@ -174,6 +225,8 @@ export struct DayCell {
     date-key: string,
     /// This day's chip rows (main day/week/month/agenda grids only; empty elsewhere).
     events: [EventRow],
+    /// Highest span-lane on this day, or -1 when it has no laid-out events.
+    max-lane: int,
 }
 
 export struct FeedChip {
@@ -411,6 +464,12 @@ component MonthGrid inherits Rectangle {
     in property <int> title-lines: 1;
     in property <bool> shade-weekends: true;
     callback select-date(string);
+    /// Day number: open the day popup for that date.
+    callback open-day(string);
+    /// Empty day body: new event on that date.
+    callback create-event(string);
+    /// date-key, uid — a chip, not the day cell.
+    callback open-event(string, string);
 
     vertical-stretch: 1;
     horizontal-stretch: 1;
@@ -454,102 +513,192 @@ component MonthGrid inherits Rectangle {
                 horizontal-stretch: 1;
             }
         }
-        for row in root.rows: HorizontalLayout {
+        for row in root.rows: week := Rectangle {
             vertical-stretch: 1;
-            for col in root.columns: ta := TouchArea {
+            horizontal-stretch: 1;
+            clip: true;
+            property <int> cols: max(1, root.columns);
+            property <length> col-w: self.width / cols;
+            property <int> max-slots: max(0, floor((self.height - 27px) / root.chip-stride));
+            HorizontalLayout {
+            width: 100%;
+            height: 100%;
+            for col in root.columns: cell := Rectangle {
                 property <DayCell> d: days[root.offset + row * root.columns + col];
-                // 16px chip + 2px gap below the 27px label row; one slot is kept for "+N more" on overflow.
-                property <int> max-slots: max(0, floor((self.height - 27px) / root.chip-stride));
-                property <int> chip-limit: ta.d.event-count > ta.max-slots
-                    ? max(0, ta.max-slots - 1)
-                    : ta.d.event-count;
+                // One slot is kept for "+N more" when a lane falls past the last row.
+                property <bool> overflow: cell.d.event-count > 0 && cell.d.max-lane >= week.max-slots;
+                property <int> chip-limit: cell.overflow ? max(0, week.max-slots - 1) : week.max-slots;
                 min-width: 0px;
                 preferred-width: 0px;
                 preferred-height: 0px;
                 min-height: 48px;
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
-                clicked => {
-                    if d.date-key != "" { root.select-date(d.date-key); }
-                }
-                Rectangle {
-                    clip: true;
-                    border-width: 1px;
-                    border-color: Theme.stroke;
-                    background: ta.pressed ? Theme.surface-press
-                        : ((ta.d.is-selected || ta.d.in-selected-week) && !ta.d.is-today
-                            ? Theme.selection-fill
-                            : (root.shade-weekends && ta.d.is-weekend ? Theme.weekend-fill : Theme.bg));
-                    // Today accent ring
-                    if ta.d.is-today: Rectangle {
-                        border-width: 2px;
-                        border-color: Theme.accent;
-                        border-radius: 2px;
-                        background: transparent;
-                        width: parent.width - 2px;
-                        height: parent.height - 2px;
-                        x: 1px;
-                        y: 1px;
-                    }
-                    VerticalLayout {
-                        padding: 3px;
-                        spacing: 2px;
-                        alignment: start;
-                        HorizontalLayout {
-                            spacing: 4px;
-                            alignment: start;
-                            if ta.d.is-today: Rectangle {
-                                width: 22px;
-                                height: 22px;
-                                border-radius: 11px;
-                                background: Theme.accent;
-                                Text {
-                                    font-family: Theme.font-family;
-                                    // Day number only — label may include month abbr for other-month cells.
-                                    text: ta.d.day;
-                                    color: Theme.text-on-accent;
-                                    font-size: Theme.font-caption;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                    width: 100%;
-                                    height: 100%;
-                                }
-                            }
-                            if !ta.d.is-today: Text {
-                                font-family: Theme.font-family;
-                                text: ta.d.label;
-                                color: Theme.text;
-                                font-size: Theme.font-caption;
-                                font-weight: 600;
+                clip: true;
+                border-width: 1px;
+                border-color: Theme.stroke;
+                background: day-hit.pressed ? Theme.surface-press
+                    : ((cell.d.is-selected || cell.d.in-selected-week) && !cell.d.is-today
+                        ? Theme.selection-fill
+                        : (root.shade-weekends && cell.d.is-weekend ? Theme.weekend-fill : Theme.bg));
+                // Behind the chips so a chip click does not also open the day.
+                day-hit := TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    clicked => {
+                        if cell.d.date-key != "" {
+                            if cell.d.has-events {
+                                root.select-date(cell.d.date-key);
+                            } else {
+                                root.create-event(cell.d.date-key);
                             }
                         }
                     }
-                    // Explicit x/y keeps chips out of the cell's layout size, which `max-slots` reads back.
-                    for e in ta.d.events: EventChip {
-                        x: 3px;
-                        y: 27px + e.day-ord * root.chip-stride;
-                        width: parent.width - 6px;
-                        height: root.chip-h;
-                        visible: e.day-ord < ta.chip-limit;
+                }
+                // Today accent ring
+                if cell.d.is-today: Rectangle {
+                    border-width: 2px;
+                    border-color: Theme.accent;
+                    border-radius: 2px;
+                    background: transparent;
+                    width: parent.width - 2px;
+                    height: parent.height - 2px;
+                    x: 1px;
+                    y: 1px;
+                }
+                VerticalLayout {
+                    padding: 3px;
+                    spacing: 2px;
+                    alignment: start;
+                    // Day number only. The rest of an empty day opens a new event.
+                    day-num := TouchArea {
+                        horizontal-stretch: 0;
+                        vertical-stretch: 0;
+                        min-width: 32px;
+                        min-height: 24px;
+                        clicked => {
+                            if cell.d.date-key != "" { root.open-day(cell.d.date-key); }
+                        }
+                        Rectangle {
+                            background: day-num.pressed ? Theme.surface-press : transparent;
+                            border-radius: 4px;
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: start;
+                                if cell.d.is-today: Rectangle {
+                                    width: 22px;
+                                    height: 22px;
+                                    border-radius: 11px;
+                                    background: Theme.accent;
+                                    Text {
+                                        font-family: Theme.font-family;
+                                        // Day number only — label may include month abbr for other-month cells.
+                                        text: cell.d.day;
+                                        color: Theme.text-on-accent;
+                                        font-size: Theme.font-caption;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                        width: 100%;
+                                        height: 100%;
+                                    }
+                                }
+                                if !cell.d.is-today: Text {
+                                    font-family: Theme.font-family;
+                                    text: cell.d.label;
+                                    color: Theme.text;
+                                    font-size: Theme.font-caption;
+                                    font-weight: 600;
+                                }
+                            }
+                        }
+                    }
+                }
+                // Timed chips stay in the cell. All-day bars are drawn on the week row so they can span.
+                for e in cell.d.events: TouchArea {
+                    visible: !e.all-day && e.span-lane < cell.chip-limit;
+                    x: 3px;
+                    y: 27px + e.span-lane * root.chip-stride;
+                    width: parent.width - 6px;
+                    height: root.chip-h;
+                    clicked => { root.open-event(cell.d.date-key, e.uid); }
+                    EventChip {
+                        width: 100%;
                         title: e.title;
                         title-lines: root.title-lines;
                         event-color: e.color;
-                        all-day: e.all-day;
+                        all-day: false;
                         compact: true;
                     }
-                    Text {
-                        font-family: Theme.font-family;
-                        x: 5px;
-                        y: 27px + ta.chip-limit * root.chip-stride;
-                        width: parent.width - 10px;
-                        height: root.chip-h;
-                        visible: ta.d.event-count > ta.chip-limit;
-                        text: "+" + (ta.d.event-count - ta.chip-limit) + " more";
-                        color: Theme.muted;
-                        font-size: 10px * Theme.font-scale;
-                        font-weight: 500;
-                        vertical-alignment: center;
+                }
+            }
+            }
+            // Multi-day all-day events are one bar across the columns they cover.
+            for col in root.columns: Rectangle {
+                property <DayCell> d: days[root.offset + row * root.columns + col];
+                property <bool> overflow: d.event-count > 0 && d.max-lane >= week.max-slots;
+                property <int> limit: overflow ? max(0, week.max-slots - 1) : week.max-slots;
+                x: 0px;
+                y: 0px;
+                width: 0px;
+                height: 0px;
+                for e in d.events: TouchArea {
+                    visible: e.all-day && e.span-cols > 0 && e.span-lane < limit;
+                    x: col * week.col-w + (e.cont-left ? 0px : 3px);
+                    y: 27px + e.span-lane * root.chip-stride;
+                    width: e.span-cols * week.col-w
+                        - (e.cont-left ? 0px : 3px)
+                        - (e.cont-right ? 0px : 3px);
+                    height: root.chip-h;
+                    clicked => { root.open-event(d.date-key, e.uid); }
+                    EventChip {
+                        width: 100%;
+                        height: 100%;
+                        title: e.title;
+                        title-lines: root.title-lines;
+                        event-color: e.color;
+                        all-day: true;
+                        compact: true;
+                        cont-left: e.cont-left;
+                        cont-right: e.cont-right;
+                    }
+                }
+            }
+            for col in root.columns: Rectangle {
+                property <DayCell> d: days[root.offset + row * root.columns + col];
+                property <bool> overflow: d.event-count > 0 && d.max-lane >= week.max-slots;
+                property <int> limit: overflow ? max(0, week.max-slots - 1) : week.max-slots;
+                property <color> fill: (d.is-selected || d.in-selected-week) && !d.is-today
+                    ? Theme.selection-fill
+                    : (root.shade-weekends && d.is-weekend ? Theme.weekend-fill : Theme.bg);
+                x: col * week.col-w;
+                y: 0px;
+                width: week.col-w;
+                height: 100%;
+                for e in d.events: TouchArea {
+                    visible: e.span-lane >= limit && e.prev-lane < limit;
+                    x: 3px;
+                    y: 27px + limit * root.chip-stride;
+                    width: parent.width - 6px;
+                    height: root.chip-h;
+                    clicked => {
+                        if d.date-key != "" { root.select-date(d.date-key); }
+                    }
+                    Rectangle {
+                        background: fill;
+                        width: 100%;
+                        height: 100%;
+                        Text {
+                            font-family: Theme.font-family;
+                            x: 2px;
+                            width: parent.width - 4px;
+                            height: 100%;
+                            text: "+" + (d.event-count - e.lane-order) + " more";
+                            color: Theme.muted;
+                            font-size: 10px * Theme.font-scale;
+                            font-weight: 500;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }
@@ -741,7 +890,8 @@ export component ZalenderView inherits Rectangle {
     // Chrome (top + side) shares this surface; the active view uses Theme.bg.
     background: Theme.surface;
 
-    in property <string> clock-text: "";
+    in property <string> clock-date: "";
+    in property <string> clock-time: "";
     in property <string> title-period: "";
     in property <string> status-text: "";
     in property <int> status-kind: 0;
@@ -761,9 +911,9 @@ export component ZalenderView inherits Rectangle {
     in property <int> grid-columns: 7;
     /// Week rows in the month grid (from the preset week count).
     in property <int> month-rows: 6;
-    /// Event title lines before ellipsis. The chip grows with this.
+    /// Cap on event title lines. The chip is only as tall as the title; the last line ends with ….
     in property <int> title-lines: 1;
-    /// Most all-day events on any day in the current day/week view.
+    /// All-day lanes in the day/week band. A multi-day event uses one lane.
     in property <int> all-day-rows: 0;
     in property <string> side-title: "";
     in property <[DayCell]> side-days;
@@ -772,24 +922,13 @@ export component ZalenderView inherits Rectangle {
     in property <[FeedChip]> feeds;
     /// Timed-grid hour slots from the active preset (uniform step).
     in property <[DayHourBucket]> hour-slots;
-    property <int> grid-start: hour-slots.length > 0 ? hour-slots[0].start-mins : 0;
-    property <int> grid-end: hour-slots.length > 0 ? hour-slots[hour-slots.length - 1].end-mins : 0;
-    property <int> grid-step: hour-slots.length > 0 ? max(1, hour-slots[0].end-mins - hour-slots[0].start-mins) : 60;
     // Per 48px hour row: one chip with time, else two compact chips.
     property <int> timed-max: show-event-time ? 1 : 2;
-    timed-probe := Text {
-        font-family: Theme.font-family;
-        width: 0px;
-        height: 0px;
-        opacity: 0;
-        accessible-role: none;
-        text: "Ag";
-        font-size: root.show-event-time ? Theme.font-event : Theme.font-event-compact;
-        font-weight: 600;
-    }
-    property <length> timed-chip-h: timed-probe.preferred-height * clamp(root.title-lines, 1, 10)
-        + (root.show-event-time ? Theme.font-event-time + 4px : 4px);
-    // Same metrics as an all-day EventChip so the band matches the chips.
+    /// Minutes from midnight for the now-lollipop.
+    in property <int> now-mins: 0;
+    /// Title + time on chips (day / week·1 / agenda).
+    in property <bool> show-event-time: false;
+    // Same line metrics as an all-day EventChip, so lane rows line up across columns.
     all-day-probe := Text {
         font-family: Theme.font-family;
         width: 0px;
@@ -801,13 +940,9 @@ export component ZalenderView inherits Rectangle {
         font-weight: 600;
     }
     property <length> all-day-chip-h: all-day-probe.preferred-height * clamp(root.title-lines, 1, 10) + 4px;
-    // 2px padding each side, 2px between chips. Empty when nothing is all-day.
+    property <length> all-day-stride: root.all-day-chip-h + 2px;
     property <length> all-day-band-h: root.all-day-rows <= 0 ? 0px
-        : 4px + root.all-day-chip-h * root.all-day-rows + 2px * max(0, root.all-day-rows - 1);
-    /// Minutes from midnight for the now-lollipop.
-    in property <int> now-mins: 0;
-    /// Title + time on chips (day / week·1 / agenda).
-    in property <bool> show-event-time: false;
+        : 2px + root.all-day-rows * root.all-day-stride;
     in property <bool> dim-past: true;
     in property <bool> shade-weekends: true;
 
@@ -815,9 +950,6 @@ export component ZalenderView inherits Rectangle {
     in property <string> day-modal-title: "";
     in property <string> selected-date-key: "";
     in property <[EventRow]> day-events;
-    // events_on sorts all-day first, then timed by start.
-    property <bool> modal-has-all-day: day-events.length > 0 && day-events[0].all-day;
-    property <bool> modal-has-timed: day-events.length > 0 && !day-events[day-events.length - 1].all-day;
 
     in property <bool> name-local-open: false;
     in-out property <string> name-local-draft: "";
@@ -852,7 +984,19 @@ export component ZalenderView inherits Rectangle {
 
     in property <bool> event-detail-open: false;
     in property <EventRow> detail-event;
+    in property <string> detail-date: "";
+    in property <[GuestRow]> detail-guests;
+    in property <[GuestRow]> detail-guest-row1;
+    in property <[GuestRow]> detail-guest-row2;
     in property <string> detail-custom-summary: "";
+    property <bool> guests-open: false;
+    property <length> sheet-radius: 28px;
+
+    changed event-detail-open => {
+        if !root.event-detail-open {
+            root.guests-open = false;
+        }
+    }
 
     in property <bool> customize-open: false;
     in property <color> customize-color: #3b82f6;
@@ -889,7 +1033,6 @@ export component ZalenderView inherits Rectangle {
 
     callback prev-period();
     callback next-period();
-    callback zoom-out();
     callback go-today();
     callback go-preset();
     callback select-preset(int);
@@ -1005,16 +1148,13 @@ export component ZalenderView inherits Rectangle {
                         glyph: Icons.chevron-right;
                         activate => { root.next-period(); }
                     }
-                    TouchArea {
-                        clicked => { root.zoom-out(); }
-                        Text {
-                            font-family: Theme.font-family;
-                            text: root.title-period;
-                            color: Theme.text;
-                            font-size: Theme.font-title;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
+                    Text {
+                        font-family: Theme.font-family;
+                        text: root.title-period;
+                        color: Theme.text;
+                        font-size: Theme.font-title;
+                        font-weight: 700;
+                        vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; }
                     ViewPill {
@@ -1084,6 +1224,29 @@ export component ZalenderView inherits Rectangle {
                 height: 100%;
                 padding: Theme.pad-sm;
                 spacing: Theme.pad-sm;
+
+                    VerticalLayout {
+                        spacing: 0px;
+                        width: 100%;
+                        Text {
+                            font-family: Theme.font-family;
+                            text: root.clock-date;
+                            color: Theme.text;
+                            font-size: 32px * Theme.font-scale;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            width: 100%;
+                        }
+                        Text {
+                            font-family: Theme.font-family;
+                            text: root.clock-time;
+                            color: Theme.text;
+                            font-size: 24px * Theme.font-scale;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            width: 100%;
+                        }
+                    }
 
                     MiniMonth {
                         title: root.side-title;
@@ -1303,7 +1466,7 @@ export component ZalenderView inherits Rectangle {
                         }
                     }
 
-                    // As tall as the busiest day's all-day events. Other days leave empty space below theirs.
+                    // One lane per row. A multi-day all-day event is a single bar across its columns.
                     if root.all-day-rows > 0: HorizontalLayout {
                         spacing: 0px;
                         width: 100%;
@@ -1326,58 +1489,68 @@ export component ZalenderView inherits Rectangle {
                             max-width: Theme.pad-sm;
                             preferred-width: Theme.pad-sm;
                         }
-                        HorizontalLayout {
-                            spacing: root.view-unit == 1 ? 3px : 0px;
+                        band := Rectangle {
                             horizontal-stretch: 1;
-                            vertical-stretch: 0;
-                            for cell[d] in main-days: Rectangle {
-                                min-width: 0px;
-                                preferred-width: 0px;
-                                horizontal-stretch: 1;
-                                vertical-stretch: 0;
+                            height: 100%;
+                            property <int> cols: max(1, root.main-days.length);
+                            property <length> gap: root.view-unit == 1 ? 3px : 0px;
+                            property <length> col-w: (self.width - gap * (cols - 1)) / cols;
+                            HorizontalLayout {
+                                spacing: band.gap;
+                                width: 100%;
                                 height: 100%;
-                                clip: true;
-                                background: root.shade-weekends && cell.is-weekend ? Theme.weekend-fill : Theme.bg;
-                                border-width: 1px;
-                                border-color: Theme.stroke;
-                                TouchArea {
-                                    width: 100%;
+                                for cell in root.main-days: Rectangle {
+                                    min-width: 0px;
+                                    preferred-width: 0px;
+                                    horizontal-stretch: 1;
                                     height: 100%;
-                                    clicked => {
-                                        if cell.date-key != "" {
-                                            root.open-create-event(cell.date-key, 0, true);
-                                        }
-                                    }
-                                    Rectangle {
+                                    clip: true;
+                                    background: root.shade-weekends && cell.is-weekend ? Theme.weekend-fill : Theme.bg;
+                                    border-width: 1px;
+                                    border-color: Theme.stroke;
+                                    TouchArea {
                                         width: 100%;
                                         height: 100%;
-                                        background: parent.pressed ? Theme.surface-press : transparent;
-                                    }
-                                }
-                                VerticalLayout {
-                                    padding: 2px;
-                                    spacing: 2px;
-                                    alignment: start;
-                                    for e in cell.events: VerticalLayout {
-                                        spacing: 0px;
-                                        if e.all-day: TouchArea {
-                                            min-width: 0px;
-                                            preferred-width: 0px;
-                                            horizontal-stretch: 1;
-                                            clicked => { root.open-event-uid(cell.date-key, e.uid); }
-                                            EventChip {
-                                                title: e.title;
-                                                title-lines: root.title-lines;
-                                                time-text: "";
-                                                event-color: e.color;
-                                                all-day: true;
-                                                show-time: false;
-                                                compact: !root.show-event-time;
-                                                min-width: 0px;
-                                                preferred-width: 0px;
-                                                horizontal-stretch: 1;
+                                        clicked => {
+                                            if cell.date-key != "" {
+                                                root.open-create-event(cell.date-key, 0, true);
                                             }
                                         }
+                                        Rectangle {
+                                            width: 100%;
+                                            height: 100%;
+                                            background: parent.pressed ? Theme.surface-press : transparent;
+                                        }
+                                    }
+                                }
+                            }
+                            for cell[col] in root.main-days: Rectangle {
+                                x: 0px;
+                                y: 0px;
+                                width: 0px;
+                                height: 0px;
+                                for e in cell.events: TouchArea {
+                                    visible: e.all-day && e.span-cols > 0;
+                                    x: col * (band.col-w + band.gap) + (e.cont-left ? 0px : 2px);
+                                    y: 2px + e.span-lane * root.all-day-stride;
+                                    width: e.span-cols * band.col-w
+                                        + max(0, e.span-cols - 1) * band.gap
+                                        - (e.cont-left ? 0px : 2px)
+                                        - (e.cont-right ? 0px : 2px);
+                                    height: root.all-day-chip-h;
+                                    clicked => { root.open-event-uid(cell.date-key, e.uid); }
+                                    EventChip {
+                                        width: 100%;
+                                        height: 100%;
+                                        title: e.title;
+                                        title-lines: root.title-lines;
+                                        time-text: "";
+                                        event-color: e.color;
+                                        all-day: true;
+                                        show-time: false;
+                                        compact: !root.show-event-time;
+                                        cont-left: e.cont-left;
+                                        cont-right: e.cont-right;
                                     }
                                 }
                             }
@@ -1457,42 +1630,57 @@ export component ZalenderView inherits Rectangle {
                                             }
                                         }
                                     }
-                                    // One pass over this day's events, placed by hour slot (above the slot TouchAreas).
-                                    for e in cell.events: TouchArea {
-                                        property <bool> in-grid: !e.all-day
-                                            && e.start-mins >= root.grid-start && e.start-mins < root.grid-end;
-                                        property <int> limit: e.slot-total > root.timed-max
-                                            ? max(0, root.timed-max - 1) : e.slot-total;
-                                        visible: in-grid && e.slot-ord < limit;
+                                    // Chips stack inside the hour at the title's real height, above the slot TouchAreas.
+                                    for slot[s] in root.hour-slots: VerticalLayout {
                                         x: 2px;
-                                        y: floor((e.start-mins - root.grid-start) / root.grid-step) * 48px
-                                            + 2px + e.slot-ord * (root.timed-chip-h + 2px);
+                                        y: s * 48px + 2px;
                                         width: parent.width - 4px;
-                                        height: root.timed-chip-h;
-                                        clicked => { root.open-event-uid(cell.date-key, e.uid); }
-                                        EventChip {
-                                            title: e.title;
-                                            title-lines: root.title-lines;
-                                            time-text: e.time-short;
-                                            event-color: e.color;
-                                            show-time: root.show-event-time;
-                                            compact: !root.show-event-time;
+                                        height: self.preferred-height;
+                                        spacing: 0px;
+                                        alignment: start;
+                                        for e in cell.events: VerticalLayout {
+                                            spacing: 0px;
+                                            if !e.all-day
+                                                && e.start-mins >= slot.start-mins
+                                                && e.start-mins < slot.end-mins
+                                                && e.slot-ord < (e.slot-total > root.timed-max
+                                                    ? max(0, root.timed-max - 1) : e.slot-total): TouchArea {
+                                                vertical-stretch: 0;
+                                                clicked => { root.open-event-uid(cell.date-key, e.uid); }
+                                                EventChip {
+                                                    width: 100%;
+                                                    title: e.title;
+                                                    title-lines: root.title-lines;
+                                                    time-text: e.time-short;
+                                                    event-color: e.color;
+                                                    show-time: root.show-event-time;
+                                                    compact: !root.show-event-time;
+                                                }
+                                            }
+                                            if !e.all-day
+                                                && e.start-mins >= slot.start-mins
+                                                && e.start-mins < slot.end-mins
+                                                && e.slot-ord < (e.slot-total > root.timed-max
+                                                    ? max(0, root.timed-max - 1) : e.slot-total): Rectangle {
+                                                height: 2px;
+                                            }
                                         }
-                                    }
-                                    for e in cell.events: Text {
-                                        font-family: Theme.font-family;
-                                        visible: !e.all-day && e.slot-ord == 0 && e.slot-total > root.timed-max
-                                            && e.start-mins >= root.grid-start && e.start-mins < root.grid-end;
-                                        x: 6px;
-                                        y: floor((e.start-mins - root.grid-start) / root.grid-step) * 48px
-                                            + 2px + (root.timed-max - 1) * (root.timed-chip-h + 2px);
-                                        width: parent.width - 8px;
-                                        height: 16px;
-                                        text: "+" + (e.slot-total - max(0, root.timed-max - 1)) + " more";
-                                        color: Theme.muted;
-                                        font-size: 10px * Theme.font-scale;
-                                        font-weight: 500;
-                                        vertical-alignment: center;
+                                        for e in cell.events: VerticalLayout {
+                                            spacing: 0px;
+                                            if !e.all-day
+                                                && e.slot-ord == 0
+                                                && e.slot-total > root.timed-max
+                                                && e.start-mins >= slot.start-mins
+                                                && e.start-mins < slot.end-mins: Text {
+                                                font-family: Theme.font-family;
+                                                text: "+" + (e.slot-total - max(0, root.timed-max - 1)) + " more";
+                                                color: Theme.muted;
+                                                font-size: 10px * Theme.font-scale;
+                                                font-weight: 500;
+                                                vertical-stretch: 0;
+                                                height: 16px;
+                                            }
+                                        }
                                     }
                                     // Danger-red now-lollipop on today's column
                                     if cell.is-today && root.hour-slots.length > 0
@@ -1544,6 +1732,9 @@ export component ZalenderView inherits Rectangle {
                         shade-weekends: root.shade-weekends;
                         vertical-stretch: 1;
                         select-date(k) => { root.select-date(k); }
+                        open-day(k) => { root.select-date(k); }
+                        create-event(k) => { root.open-create-event(k, 9 * 60, false); }
+                        open-event(k, uid) => { root.open-event-uid(k, uid); }
                     }
                 }
 
@@ -1606,6 +1797,7 @@ export component ZalenderView inherits Rectangle {
                                 }
                             }
                             for e in cell.events: TouchArea {
+                                vertical-stretch: 0;
                                 clicked => { root.open-event-uid(cell.date-key, e.uid); }
                                 EventChip {
                                     title: e.title;
@@ -1653,7 +1845,7 @@ export component ZalenderView inherits Rectangle {
         background: Theme.dim;
     }
 
-    // Day modal (month/year): all-day block, then timed events, flush and only as tall as their rows.
+    // Day modal (month/year): date header, then events packed from the top of the list.
     if day-modal-open: day-scrim := TouchArea {
         width: 100%;
         height: 100%;
@@ -1662,29 +1854,41 @@ export component ZalenderView inherits Rectangle {
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: min(520px, parent.width - 48px);
+            width: min(600px, parent.width - 48px);
             clicked => { }
             day-sheet := Rectangle {
                 width: 100%;
                 max-height: day-scrim.height - 48px;
                 background: Theme.surface;
-                border-radius: Theme.radius;
+                border-radius: root.sheet-radius;
                 border-width: 1px;
                 border-color: Theme.stroke;
                 VerticalLayout {
                     padding: Theme.pad;
                     spacing: Theme.pad-sm;
-                    day-title := Text {
-                        font-family: Theme.font-family;
-                        text: root.day-modal-title;
-                        color: Theme.text;
-                        font-size: Theme.font-title;
-                        font-weight: 700;
-                        wrap: word-wrap;
-                        width: 100%;
+                    alignment: start;
+                    day-title := Rectangle {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 0;
+                        background: Theme.bg;
+                        border-radius: Theme.radius;
+                        border-width: 1px;
+                        border-color: Theme.stroke;
+                        VerticalLayout {
+                            padding: Theme.pad-sm;
+                            Text {
+                                font-family: Theme.font-family;
+                                text: root.day-modal-title;
+                                color: Theme.text;
+                                font-size: Theme.font-body;
+                                font-weight: 700;
+                                wrap: word-wrap;
+                                width: 100%;
+                            }
+                        }
                     }
                     day-scroll := Flickable {
-                        property <length> list-w: min(520px, day-scrim.width - 48px) - Theme.pad * 2;
+                        property <length> list-w: min(600px, day-scrim.width - 48px) - Theme.pad * 2;
                         property <length> chrome: day-title.preferred-height + day-actions.preferred-height + Theme.pad * 2 + Theme.pad-sm * 2;
                         property <length> limit: max(0px, day-sheet.max-height - chrome);
                         // Content height until the sheet would leave the screen, then this region scrolls.
@@ -1693,43 +1897,16 @@ export component ZalenderView inherits Rectangle {
                         content-width: list-w;
                         content-height: day-list.preferred-height;
                         day-list := VerticalLayout {
-                            spacing: 0px;
+                            alignment: start;
+                            spacing: 2px;
                             width: day-scroll.list-w;
-                            if root.modal-has-all-day: VerticalLayout {
-                                spacing: 0px;
-                                width: day-scroll.list-w;
-                                Text {
-                                    font-family: Theme.font-family;
-                                    text: "All day";
-                                    color: Theme.muted;
-                                    font-size: Theme.font-caption;
-                                    font-weight: 600;
-                                    height: self.preferred-height + 4px;
-                                    vertical-alignment: top;
-                                }
-                                for e[ei] in day-events: VerticalLayout {
-                                    if e.all-day: DayModalRow {
-                                        title: e.title;
-                                        calendar: e.calendar;
-                                        event-color: e.color;
-                                        icon: e.icon;
-                                        clicked => { root.open-event(ei); }
-                                    }
-                                }
-                            }
-                            if root.modal-has-timed: VerticalLayout {
-                                spacing: 0px;
-                                width: day-scroll.list-w;
-                                for e[ei] in day-events: VerticalLayout {
-                                    if !e.all-day: DayModalRow {
-                                        title: e.title;
-                                        time: e.time;
-                                        calendar: e.calendar;
-                                        event-color: e.color;
-                                        icon: e.icon;
-                                        clicked => { root.open-event(ei); }
-                                    }
-                                }
+                            for e[ei] in day-events: DayModalRow {
+                                title: e.title;
+                                time: e.all-day ? "" : e.time;
+                                calendar: e.calendar;
+                                event-color: e.color;
+                                icon: e.icon;
+                                clicked => { root.open-event(ei); }
                             }
                         }
                     }
@@ -1765,11 +1942,11 @@ export component ZalenderView inherits Rectangle {
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: min(560px, parent.width - 48px);
+            width: min(620px, parent.width - 48px);
             clicked => { }
             Rectangle {
                 background: Theme.surface;
-                border-radius: Theme.radius;
+                border-radius: root.sheet-radius;
                 VerticalLayout {
                     padding: Theme.pad-sm;
                     spacing: Theme.pad-sm;
@@ -1855,14 +2032,14 @@ export component ZalenderView inherits Rectangle {
             y: (parent.height - self.height) / 2;
             // Wide enough for date and the two times on one row. Tall enough that
             // the fields fit the 800px window without a scroller.
-            width: min(860px, parent.width - 48px);
-            height: min(560px, parent.height - 48px);
+            width: min(920px, parent.width - 48px);
+            height: min(620px, parent.height - 48px);
             clicked => { }
             Rectangle {
                 width: 100%;
                 height: 100%;
                 background: Theme.surface;
-                border-radius: Theme.radius;
+                border-radius: root.sheet-radius;
                 VerticalLayout {
                     width: 100%;
                     height: 100%;
@@ -2048,14 +2225,14 @@ export component ZalenderView inherits Rectangle {
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: min(640px, parent.width - 48px);
-            height: min(560px, parent.height - 48px);
+            width: min(700px, parent.width - 48px);
+            height: min(620px, parent.height - 48px);
             clicked => { }
             Rectangle {
                 width: 100%;
                 height: 100%;
                 background: Theme.surface;
-                border-radius: Theme.radius;
+                border-radius: root.sheet-radius;
                 VerticalLayout {
                     width: 100%;
                     height: 100%;
@@ -2249,86 +2426,271 @@ export component ZalenderView inherits Rectangle {
         width: 100%;
         height: 100%;
         z: 60;
-        clicked => { root.close-event-detail(); }
+        clicked => {
+            root.guests-open = false;
+            root.close-event-detail();
+        }
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: min(480px, parent.width - 48px);
-            height: min(420px, parent.height - 48px);
+            width: min(680px, parent.width - 32px);
+            height: min(640px, parent.height - 32px);
             clicked => { }
             Rectangle {
+                width: 100%;
+                height: 100%;
                 background: Theme.surface;
-                border-radius: Theme.radius;
-                VerticalLayout {
+                border-radius: root.sheet-radius;
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
                     padding: Theme.pad;
-                    spacing: Theme.pad;
-                    Text {
-                        font-family: Theme.font-family;
-                        text: detail-event.title;
-                        color: Theme.text;
-                        font-size: Theme.font-title;
-                        font-weight: 700;
-                        wrap: word-wrap;
-                    }
-                    Text {
-                        font-family: Theme.font-family;
-                        text: detail-event.time;
-                        color: Theme.muted;
-                        font-size: Theme.font-body;
-                    }
-                    Text {
-                        font-family: Theme.font-family;
-                        text: detail-event.calendar;
-                        color: Theme.muted;
-                        font-size: Theme.font-caption;
-                    }
-                    if detail-event.location != "": Text {
-                        font-family: Theme.font-family;
-                        text: detail-event.location;
-                        color: Theme.text;
-                        font-size: Theme.font-body;
-                        wrap: word-wrap;
-                    }
-                    if detail-event.description != "": Text {
-                        font-family: Theme.font-family;
-                        text: detail-event.description;
-                        color: Theme.text;
-                        font-size: Theme.font-body;
-                        wrap: word-wrap;
-                    }
-                    if detail-custom-summary != "": Text {
-                        font-family: Theme.font-family;
-                        text: detail-custom-summary;
-                        color: Theme.muted;
-                        font-size: Theme.font-caption;
-                        wrap: word-wrap;
-                    }
-                    VerticalLayout {
-                        spacing: 4px;
-                        HorizontalLayout {
-                            spacing: Theme.pad-sm;
-                            Button {
-                                label: "Edit";
-                                role: "secondary";
-                                active: detail-event.writable;
-                                activate => { root.open-edit(); }
+                    spacing: 4px;
+                    detail-body := Flickable {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        min-width: 0px;
+                        content-width: self.width;
+                        content-height: detail-col.preferred-height;
+                        detail-col := VerticalLayout {
+                            width: parent.width;
+                            spacing: 16px;
+                            alignment: start;
+                            VerticalLayout {
+                                spacing: 4px;
+                                width: 100%;
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: detail-event.title;
+                                    color: Theme.text;
+                                    font-size: Theme.font-title;
+                                    font-weight: 700;
+                                    wrap: word-wrap;
+                                    width: 100%;
+                                }
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: root.detail-date;
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                    width: 100%;
+                                }
                             }
-                            Button {
-                                label: "Customize";
-                                role: "primary";
-                                activate => { root.open-customize(); }
+                            VerticalLayout {
+                                spacing: 12px;
+                                width: 100%;
+                                SectionRule {}
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: detail-event.time;
+                                    color: Theme.text;
+                                    font-size: Theme.font-body;
+                                    width: 100%;
+                                }
                             }
-                            Button {
-                                label: "Close";
-                                role: "secondary";
-                                activate => { root.close-event-detail(); }
+                            if detail-event.location != "": VerticalLayout {
+                                spacing: 12px;
+                                width: 100%;
+                                SectionRule {}
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: detail-event.location;
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                    wrap: word-wrap;
+                                    width: 100%;
+                                }
+                            }
+                            if root.detail-guests.length > 0: VerticalLayout {
+                                spacing: 12px;
+                                width: 100%;
+                                SectionRule {}
+                                VerticalLayout {
+                                spacing: 6px;
+                                width: 100%;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    width: 100%;
+                                    for g in root.detail-guest-row1: GuestName {
+                                        name: g.name;
+                                        organizer: g.organizer;
+                                        horizontal-stretch: 1;
+                                    }
+                                    if root.detail-guest-row1.length < 5: Rectangle {
+                                        horizontal-stretch: 5 - root.detail-guest-row1.length;
+                                        vertical-stretch: 0;
+                                    }
+                                }
+                                if root.detail-guest-row2.length > 0: HorizontalLayout {
+                                    spacing: 8px;
+                                    width: 100%;
+                                    for g in root.detail-guest-row2: GuestName {
+                                        name: g.name;
+                                        organizer: g.organizer;
+                                        horizontal-stretch: 1;
+                                    }
+                                    if root.detail-guest-row2.length < 5: Rectangle {
+                                        horizontal-stretch: 5 - root.detail-guest-row2.length;
+                                        vertical-stretch: 0;
+                                    }
+                                }
+                                if root.detail-guests.length > 10: TouchArea {
+                                    min-width: Theme.touch-min;
+                                    min-height: Theme.touch-min;
+                                    horizontal-stretch: 0;
+                                    clicked => { root.guests-open = true; }
+                                    Text {
+                                        font-family: Theme.font-family;
+                                        text: "...";
+                                        color: Theme.accent;
+                                        font-size: Theme.font-title;
+                                        font-weight: 700;
+                                        width: 100%;
+                                        height: 100%;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: left;
+                                    }
+                                }
+                                }
+                            }
+                            if detail-event.description != "": VerticalLayout {
+                                spacing: 12px;
+                                width: 100%;
+                                SectionRule {}
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: detail-event.description;
+                                    color: Theme.text;
+                                    font-size: Theme.font-body;
+                                    wrap: word-wrap;
+                                    width: 100%;
+                                }
+                            }
+                            if detail-custom-summary != "": VerticalLayout {
+                                spacing: 12px;
+                                width: 100%;
+                                SectionRule {}
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: detail-custom-summary;
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                    wrap: word-wrap;
+                                    width: 100%;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: 12px;
+                                width: 100%;
+                                SectionRule {}
+                                Text {
+                                    font-family: Theme.font-family;
+                                    text: "event source: " + detail-event.calendar;
+                                    color: Theme.muted;
+                                    font-size: Theme.font-caption;
+                                    wrap: word-wrap;
+                                    width: 100%;
+                                }
                             }
                         }
-                        if !detail-event.writable: Text {
-                            font-family: Theme.font-family;
-                            text: "Edit is unavailable — this feed is read-only.";
-                            color: Theme.muted;
-                            font-size: Theme.font-caption;
+                    }
+                    VerticalLayout {
+                        spacing: 0px;
+                        alignment: start;
+                        horizontal-stretch: 0;
+                        IconButton {
+                            glyph: Icons.xmark;
+                            activate => {
+                                root.guests-open = false;
+                                root.close-event-detail();
+                            }
+                        }
+                        IconButton {
+                            glyph: Icons.pencil;
+                            active: detail-event.writable;
+                            activate => { root.open-edit(); }
+                        }
+                        IconButton {
+                            glyph: Icons.palette;
+                            activate => { root.open-customize(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.guests-open: TouchArea {
+            width: 100%;
+            height: 100%;
+            z: 2;
+            clicked => { root.guests-open = false; }
+            Rectangle {
+                width: 100%;
+                height: 100%;
+                background: Theme.dim;
+            }
+            TouchArea {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(560px, parent.width - 64px);
+                height: min(560px, parent.height - 64px);
+                clicked => { }
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+                    background: Theme.surface;
+                    border-radius: root.sheet-radius;
+                    VerticalLayout {
+                        padding: Theme.pad;
+                        spacing: Theme.pad-sm;
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                font-family: Theme.font-family;
+                                text: "Invitees";
+                                color: Theme.text;
+                                font-size: Theme.font-title;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                            IconButton {
+                                glyph: Icons.xmark;
+                                activate => { root.guests-open = false; }
+                            }
+                        }
+                        Flickable {
+                            vertical-stretch: 1;
+                            horizontal-stretch: 1;
+                            content-width: self.width;
+                            content-height: invitee-col.preferred-height;
+                            invitee-col := VerticalLayout {
+                                width: parent.width;
+                                spacing: 4px;
+                                alignment: start;
+                                for g in root.detail-guests: HorizontalLayout {
+                                    spacing: 10px;
+                                    alignment: start;
+                                    min-height: 36px;
+                                    Text {
+                                        font-family: Theme.font-family;
+                                        text: g.name;
+                                        color: Theme.text;
+                                        font-size: Theme.font-body;
+                                        vertical-alignment: center;
+                                        wrap: word-wrap;
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                    }
+                                    if g.organizer: Text {
+                                        font-family: Theme.font-family;
+                                        text: "organizer";
+                                        color: Theme.muted;
+                                        font-size: Theme.font-body;
+                                        font-italic: true;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -2345,12 +2707,12 @@ export component ZalenderView inherits Rectangle {
         TouchArea {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: min(520px, parent.width - 48px);
-            height: min(640px, parent.height - 48px);
+            width: min(600px, parent.width - 48px);
+            height: min(700px, parent.height - 48px);
             clicked => { }
             Rectangle {
                 background: Theme.surface;
-                border-radius: Theme.radius;
+                border-radius: root.sheet-radius;
                 VerticalLayout {
                     padding: Theme.pad;
                     spacing: Theme.pad-sm;
@@ -2513,10 +2875,10 @@ export component ZalenderView inherits Rectangle {
         Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: 400px;
-            height: 200px;
+            width: min(480px, parent.width - 48px);
+            height: min(260px, parent.height - 48px);
             background: Theme.surface;
-            border-radius: Theme.radius;
+            border-radius: root.sheet-radius;
             VerticalLayout {
                 padding: Theme.pad;
                 spacing: Theme.pad;

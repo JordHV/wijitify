@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
-use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc, Weekday};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Utc, Weekday};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,9 +21,44 @@ pub struct CalEvent {
     pub description: String,
     #[serde(default)]
     pub location: String,
+    /// Display name of the ICS organizer. Empty when the feed has none.
+    #[serde(default)]
+    pub organizer: String,
+    /// Other invitees, in feed order. The organizer is not repeated here.
+    #[serde(default)]
+    pub attendees: Vec<String>,
     /// Series rule for a stored local event. Occurrences leave this empty.
     #[serde(default)]
     pub rrule: Option<String>,
+}
+
+/// Last calendar day this event occupies. All-day `DTEND` is exclusive.
+pub fn occupied_end(ev: &CalEvent) -> NaiveDate {
+    let start = ev.start.date_naive();
+    let end = ev.end.date_naive();
+    if ev.all_day && end > start {
+        end - Duration::days(1)
+    } else if ev.all_day {
+        start
+    } else {
+        end
+    }
+}
+
+/// `m/d/yyyy - Weekday` for the event card. All-day dates stay on the ICS day.
+pub fn detail_date_label(ev: &CalEvent) -> String {
+    let day = if ev.all_day {
+        ev.start.date_naive()
+    } else {
+        ev.start.with_timezone(&Local).date_naive()
+    };
+    format!(
+        "{}/{}/{} - {}",
+        day.month(),
+        day.day(),
+        day.year(),
+        day.format("%A")
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,17 +84,7 @@ impl CalendarSnapshot {
         let mut by_day: BTreeMap<NaiveDate, Vec<usize>> = BTreeMap::new();
         for (idx, ev) in events.iter().enumerate() {
             let start_day = ev.start.date_naive();
-            let end_day = if ev.all_day {
-                // Exclusive DTEND for all-day: last day is end - 1 day when end > start.
-                let end = ev.end.date_naive();
-                if end > start_day {
-                    end - Duration::days(1)
-                } else {
-                    start_day
-                }
-            } else {
-                ev.end.date_naive()
-            };
+            let end_day = occupied_end(ev);
             let mut d = start_day.max(window_start);
             let last = end_day.min(window_end);
             while d <= last {
@@ -89,6 +114,18 @@ impl CalendarSnapshot {
                 .then_with(|| a.start.cmp(&b.start))
         });
         evs
+    }
+
+    /// True when `day` has at least one event on a visible feed.
+    /// Does not allocate or sort — mini month / year dots only need presence.
+    pub fn has_visible_event(&self, day: NaiveDate, visible: &HashSet<String>) -> bool {
+        self.by_day.get(&day).is_some_and(|idxs| {
+            idxs.iter().any(|i| {
+                self.events
+                    .get(*i)
+                    .is_some_and(|e| visible.contains(&e.feed_id))
+            })
+        })
     }
 }
 
@@ -136,6 +173,8 @@ pub fn start_of_week(day: NaiveDate, week_start: u32) -> NaiveDate {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     #[test]
@@ -171,6 +210,8 @@ mod tests {
             color: "#3b82f6".into(),
             description: String::new(),
             location: String::new(),
+            organizer: String::new(),
+            attendees: Vec::new(),
             rrule: None,
         };
         assert_eq!(e.uid, "abc");
@@ -197,6 +238,8 @@ mod tests {
             color: "#000".into(),
             description: String::new(),
             location: String::new(),
+            organizer: String::new(),
+            attendees: Vec::new(),
             rrule: None,
         };
         let all_day = CalEvent {
@@ -215,6 +258,8 @@ mod tests {
             color: "#000".into(),
             description: String::new(),
             location: String::new(),
+            organizer: String::new(),
+            attendees: Vec::new(),
             rrule: None,
         };
         // Insert timed first so index order alone would put it first.
@@ -223,5 +268,59 @@ mod tests {
         assert_eq!(on.len(), 2);
         assert!(on[0].all_day);
         assert!(!on[1].all_day);
+    }
+
+    #[test]
+    fn has_visible_event_skips_hidden_feeds_and_empty_days() {
+        let day = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+        let start = DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let ev = CalEvent {
+            uid: "a".into(),
+            recurrence_id: None,
+            title: "Shown".into(),
+            start,
+            end: start + Duration::days(1),
+            all_day: true,
+            feed_id: "shown".into(),
+            feed_name: "Shown".into(),
+            color: "#000".into(),
+            description: String::new(),
+            location: String::new(),
+            organizer: String::new(),
+            attendees: Vec::new(),
+            rrule: None,
+        };
+        let snap = CalendarSnapshot::from_events(vec![ev], day, day);
+        let shown = HashSet::from([String::from("shown")]);
+        let hidden = HashSet::from([String::from("other")]);
+        assert!(snap.has_visible_event(day, &shown));
+        assert!(!snap.has_visible_event(day, &hidden));
+        assert!(!snap.has_visible_event(day + Duration::days(1), &shown));
+    }
+
+    #[test]
+    fn detail_date_is_month_day_year_and_weekday() {
+        let start = DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let ev = CalEvent {
+            uid: "d".into(),
+            recurrence_id: None,
+            title: "Sunday".into(),
+            start,
+            end: start + Duration::days(1),
+            all_day: true,
+            feed_id: "f".into(),
+            feed_name: "f".into(),
+            color: "#000".into(),
+            description: String::new(),
+            location: String::new(),
+            organizer: String::new(),
+            attendees: Vec::new(),
+            rrule: None,
+        };
+        assert_eq!(detail_date_label(&ev), "11/1/2026 - Sunday");
     }
 }

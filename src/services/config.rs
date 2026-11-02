@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use super::storage::{self, Paths};
 
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -36,7 +36,7 @@ impl ThemeMode {
     }
 }
 
-/// Editable UI colors. Selecting Dark/Light resets these to mode defaults.
+/// Editable UI colors. Dark/Light each remember their last palette; Reset restores mode defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemePalette {
     pub bg: String,
@@ -176,16 +176,6 @@ impl ViewUnit {
             Self::Month => 6,
             Self::Year => 2,
             Self::Agenda => 4,
-        }
-    }
-
-    pub fn zoom_out(self) -> Self {
-        match self {
-            Self::Day => Self::Week,
-            Self::Week => Self::Month,
-            Self::Month => Self::Year,
-            Self::Year => Self::Year,
-            Self::Agenda => Self::Month,
         }
     }
 
@@ -462,15 +452,6 @@ impl DatetimeFormat {
             Self::MmDdYyAmPm => "MM/DD/YY hh:mm AM/PM",
             Self::YyyyMmDd24h => "YYYY-MM-DD HH:mm",
             Self::DdMmYyyy24h => "DD/MM/YYYY HH:mm",
-        }
-    }
-
-    pub fn chrono_pattern(self) -> &'static str {
-        match self {
-            Self::DdMmYyAmPm => "%d/%m/%y %I:%M %p",
-            Self::MmDdYyAmPm => "%m/%d/%y %I:%M %p",
-            Self::YyyyMmDd24h => "%Y-%m-%d %H:%M",
-            Self::DdMmYyyy24h => "%d/%m/%Y %H:%M",
         }
     }
 
@@ -808,8 +789,18 @@ pub struct Config {
     pub theme: ThemeMode,
     #[serde(default = "default_accent")]
     pub accent: String,
+    /// Active palette for `theme` (mirrored into palette_dark / palette_light).
     #[serde(default)]
     pub palette: ThemePalette,
+    /// Last colors used while Dark was selected. Restored when switching back to Dark.
+    #[serde(default = "default_palette_dark")]
+    pub palette_dark: ThemePalette,
+    /// Last colors used while Light was selected. Restored when switching back to Light.
+    #[serde(default = "default_palette_light")]
+    pub palette_light: ThemePalette,
+    /// Randomize coherence: 100 = harmonized Dark/Light ladders; 0 = fully independent colors.
+    #[serde(default = "default_theme_random_coherence")]
+    pub theme_random_coherence: u8,
     #[serde(default)]
     pub datetime_format: DatetimeFormat,
     #[serde(default)]
@@ -921,6 +912,15 @@ fn default_color() -> String {
 fn default_accent() -> String {
     "#3b82f6".into()
 }
+fn default_palette_dark() -> ThemePalette {
+    ThemePalette::for_mode(ThemeMode::Dark)
+}
+fn default_palette_light() -> ThemePalette {
+    ThemePalette::for_mode(ThemeMode::Light)
+}
+fn default_theme_random_coherence() -> u8 {
+    100
+}
 fn default_next_feed_id() -> u32 {
     1
 }
@@ -950,6 +950,9 @@ impl Default for Config {
             theme: ThemeMode::Dark,
             accent: default_accent(),
             palette: ThemePalette::for_mode(ThemeMode::Dark),
+            palette_dark: ThemePalette::for_mode(ThemeMode::Dark),
+            palette_light: ThemePalette::for_mode(ThemeMode::Light),
+            theme_random_coherence: default_theme_random_coherence(),
             datetime_format: DatetimeFormat::default(),
             font_family: UiFontFamily::default(),
             font_scale: FontScale::default(),
@@ -1135,6 +1138,35 @@ impl Config {
             .insert("zalender".into(), ModuleConfig::Zalender(z));
     }
 
+    /// Write the active palette into the slot for the current theme mode.
+    pub fn remember_active_palette(&mut self) {
+        match self.theme {
+            ThemeMode::Dark => self.palette_dark = self.palette.clone(),
+            ThemeMode::Light => self.palette_light = self.palette.clone(),
+        }
+    }
+
+    /// Replace the active palette and remember it for the current mode.
+    pub fn set_active_palette(&mut self, palette: ThemePalette) {
+        self.palette = palette;
+        self.accent = self.palette.accent.clone();
+        self.remember_active_palette();
+    }
+
+    /// Switch Dark/Light, keeping each mode’s last palette (defaults until edited).
+    pub fn set_theme_mode(&mut self, mode: ThemeMode) {
+        if self.theme == mode {
+            return;
+        }
+        self.remember_active_palette();
+        self.theme = mode;
+        self.palette = match mode {
+            ThemeMode::Dark => self.palette_dark.clone(),
+            ThemeMode::Light => self.palette_light.clone(),
+        };
+        self.accent = self.palette.accent.clone();
+    }
+
     pub fn module_enabled(&self, id: &str) -> bool {
         match self.modules.get(id) {
             Some(ModuleConfig::Zalender(z)) => z.enabled,
@@ -1237,6 +1269,19 @@ fn migrate(mut cfg: Config) -> Result<Config> {
             // Keep the previous combined size until the user picks Event font size.
             cfg.event_font_scale = cfg.font_scale;
         }
+        if next == 9 {
+            // Remember last palette per mode; seed from the active palette.
+            cfg.palette_dark = ThemePalette::for_mode(ThemeMode::Dark);
+            cfg.palette_light = ThemePalette::for_mode(ThemeMode::Light);
+            match cfg.theme {
+                ThemeMode::Dark => cfg.palette_dark = cfg.palette.clone(),
+                ThemeMode::Light => cfg.palette_light = cfg.palette.clone(),
+            }
+        }
+        if next == 10 {
+            // theme_random_coherence defaults to 100 via serde / Default.
+            cfg.theme_random_coherence = default_theme_random_coherence();
+        }
         cfg.schema_version = next;
     }
     if !cfg.modules.contains_key("zalender") {
@@ -1312,15 +1357,10 @@ mod tests {
     fn migrate_v1_to_current() {
         let mut cfg = Config {
             schema_version: 1,
-            setup_complete: true,
-            theme: ThemeMode::Dark,
             accent: String::new(),
-            palette: ThemePalette::default(),
-            datetime_format: DatetimeFormat::default(),
-            font_family: UiFontFamily::default(),
-            font_scale: FontScale::default(),
-            event_font_scale: FontScale::default(),
             modules: BTreeMap::new(),
+            setup_complete: true,
+            ..Config::default()
         };
         cfg = migrate(cfg).unwrap();
         assert_eq!(cfg.schema_version, SCHEMA_VERSION);
@@ -1328,6 +1368,8 @@ mod tests {
         assert!(cfg.modules.contains_key("zalender"));
         assert_eq!(cfg.accent, "#3b82f6");
         assert_eq!(cfg.palette.bg, "#0f1419");
+        assert_eq!(cfg.palette_dark.bg, cfg.palette.bg);
+        assert_eq!(cfg.palette_light, ThemePalette::for_mode(ThemeMode::Light));
         let z = cfg.zalender();
         assert_eq!(z.presets.len(), 5);
         assert!(z.presets.iter().all(|p| p.builtin && p.visible));
@@ -1365,15 +1407,10 @@ mod tests {
         modules.insert("zalender".into(), ModuleConfig::Zalender(z));
         let mut cfg = Config {
             schema_version: 2,
-            setup_complete: true,
-            theme: ThemeMode::Dark,
             accent: String::new(),
-            palette: ThemePalette::default(),
-            datetime_format: DatetimeFormat::default(),
-            font_family: UiFontFamily::default(),
-            font_scale: FontScale::default(),
-            event_font_scale: FontScale::default(),
             modules,
+            setup_complete: true,
+            ..Config::default()
         };
         cfg = migrate(cfg).unwrap();
         assert_eq!(cfg.schema_version, SCHEMA_VERSION);
@@ -1401,15 +1438,9 @@ mod tests {
         modules.insert("zalender".into(), ModuleConfig::Zalender(z));
         let mut cfg = Config {
             schema_version: 4,
-            setup_complete: true,
-            theme: ThemeMode::Dark,
-            accent: default_accent(),
-            palette: ThemePalette::default(),
-            datetime_format: DatetimeFormat::default(),
-            font_family: UiFontFamily::default(),
-            font_scale: FontScale::default(),
-            event_font_scale: FontScale::default(),
             modules,
+            setup_complete: true,
+            ..Config::default()
         };
         // Simulate pre-migrate deserialize: clear builtins that Default seeded.
         {
@@ -1441,15 +1472,9 @@ mod tests {
         modules.insert("zalender".into(), ModuleConfig::Zalender(z));
         let mut cfg = Config {
             schema_version: 5,
-            setup_complete: true,
-            theme: ThemeMode::Dark,
-            accent: default_accent(),
-            palette: ThemePalette::default(),
-            datetime_format: DatetimeFormat::default(),
-            font_family: UiFontFamily::default(),
-            font_scale: FontScale::default(),
-            event_font_scale: FontScale::default(),
             modules,
+            setup_complete: true,
+            ..Config::default()
         };
         cfg = migrate(cfg).unwrap();
         assert_eq!(cfg.schema_version, SCHEMA_VERSION);
@@ -1477,18 +1502,36 @@ mod tests {
     fn migrate_missing_zalender() {
         let mut cfg = Config {
             schema_version: 1,
-            setup_complete: true,
-            theme: ThemeMode::Dark,
-            accent: default_accent(),
-            palette: ThemePalette::default(),
-            datetime_format: DatetimeFormat::default(),
-            font_family: UiFontFamily::default(),
-            font_scale: FontScale::default(),
-            event_font_scale: FontScale::default(),
             modules: BTreeMap::new(),
+            setup_complete: true,
+            ..Config::default()
         };
         cfg = migrate(cfg).unwrap();
         assert!(cfg.modules.contains_key("zalender"));
+    }
+
+    #[test]
+    fn theme_mode_remembers_palettes() {
+        let mut cfg = Config::default();
+        let custom_dark = ThemePalette {
+            accent: "#112233".into(),
+            ..ThemePalette::for_mode(ThemeMode::Dark)
+        };
+        cfg.set_active_palette(custom_dark.clone());
+        cfg.set_theme_mode(ThemeMode::Light);
+        assert_eq!(cfg.theme, ThemeMode::Light);
+        assert_eq!(cfg.palette, ThemePalette::for_mode(ThemeMode::Light));
+        assert_eq!(cfg.palette_dark, custom_dark);
+
+        let custom_light = ThemePalette {
+            accent: "#abcdef".into(),
+            ..ThemePalette::for_mode(ThemeMode::Light)
+        };
+        cfg.set_active_palette(custom_light.clone());
+        cfg.set_theme_mode(ThemeMode::Dark);
+        assert_eq!(cfg.palette, custom_dark);
+        assert_eq!(cfg.palette_light, custom_light);
+        assert_eq!(cfg.accent, custom_dark.accent);
     }
 
     #[test]
@@ -1498,9 +1541,6 @@ mod tests {
         assert_eq!(ViewUnit::Month.max_count(), 6);
         assert_eq!(ViewUnit::Year.max_count(), 2);
         assert_eq!(ViewUnit::Agenda.max_count(), 4);
-        assert_eq!(ViewUnit::Day.zoom_out(), ViewUnit::Week);
-        assert_eq!(ViewUnit::Year.zoom_out(), ViewUnit::Year);
-        assert_eq!(ViewUnit::Agenda.zoom_out(), ViewUnit::Month);
         assert_eq!(ViewUnit::Agenda.as_i32(), 4);
         assert_eq!(ViewUnit::from_i32(4), ViewUnit::Agenda);
     }

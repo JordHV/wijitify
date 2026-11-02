@@ -235,6 +235,8 @@ mod tests {
             color: "#3b82f6".into(),
             description: String::new(),
             location: String::new(),
+            organizer: String::new(),
+            attendees: Vec::new(),
             rrule: None,
         }
     }

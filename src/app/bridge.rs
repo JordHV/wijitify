@@ -6,11 +6,11 @@ use chrono::{Datelike, Local, NaiveDate, NaiveTime, TimeZone, Timelike, Utc};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 
 use crate::app::color;
-use crate::app::setup::SetupDraft;
+use crate::app::setup::{self, SetupDraft};
 use crate::app::shell::{Screen, ShellState, WIJITIFY_SETTINGS_PAGE};
 use crate::modules::zalender::{
     self,
-    local_events::{self, LocalEventStore, LOCAL_FEED_ID},
+    local_events::{self, LocalEventStore},
     model as zal_model,
     overrides::{self, EventOverride, OverrideKey, OverrideStore},
     recur::{self, RepeatDraft},
@@ -20,10 +20,11 @@ use crate::modules::{registry, Module, ModuleContext};
 use crate::services::config::{
     AnchorMode, Config, CustomFieldDef, CustomFieldType, DatetimeFormat, DisplayOptions,
     FeedConfig, FontScale, ThemeMode, ThemePalette, UiFontFamily, ViewPreset, ViewUnit, WeekStart,
-    ZalenderConfig,
+    ZalenderConfig, LOCAL_FEED_ID,
 };
 use crate::services::storage::Paths;
 use crate::services::tasks::TaskRuntime;
+use crate::services::theme_random;
 use crate::services::update::{self, status, UpdateCmd, UpdateState};
 
 #[allow(clippy::unwrap_used)]
@@ -34,17 +35,17 @@ pub use generated::*;
 
 const HELP_TEXT: &str = "\
 Dashboard\n\
-The top bar shows the clock, period title with arrows, Today, the view pill, refresh, and Settings (gear). The left sidebar has two mini months and calendar toggles.\n\n\
+The top bar shows the period title with arrows, Today, the view pill, refresh, and Settings (gear). The left sidebar shows today’s date and time above the mini month and calendar toggles.\n\n\
 Views\n\
-Day and Week show an all-day row plus timed events with a red now-line on today. Month and Year use grids (title-only chips). Agenda is a chronological list. Settings → Preset views manages Day/Week/Month/Year/Agenda auto presets plus any you create. Toggle Show to put a preset in the dashboard pill. Default (one at a time) is what the dashboard Default button restores — today in that view — and the startup view. Each preset has a checkbox per weekday; unchecked days are left out of that view. Month presets set a week count. With Start on this week, 1 is that week and 2 adds the next. Without it, the grid starts on the week of the 1st and runs through the week you are viewing; week count 1 stops there, and 2 also shows the next week. Title lines is how many lines an event title uses before it ends with …; the event box grows to fit.\n\n\
+Day and Week show an all-day row plus timed events with a red now-line on today. An all-day event that covers several days is one bar across those days in Day, Week, and Month. Month and Year use grids (title-only chips). Agenda is a chronological list. Settings → Preset views manages Day/Week/Month/Year/Agenda auto presets plus any you create. Toggle Show to put a preset in the dashboard pill. Default (one at a time) is what the dashboard Default button restores — today in that view — and the startup view. Each preset has a checkbox per weekday; unchecked days are left out of that view. Month presets set a week count. With Start on this week, 1 is that week and 2 adds the next. Without it, the grid starts on the week of the 1st and runs through the week you are viewing; week count 1 stops there, and 2 also shows the next week. Title lines is the most lines an event title may use before it ends with …; a shorter title stays only as tall as its text.\n\n\
 Navigation\n\
-Arrows move by one unit of the current grain (Agenda steps by its week count). A month that starts on this week steps by its week count; otherwise arrows move one month. Tapping the period title zooms out one level. The view pill switches among visible presets.\n\n\
+Arrows move by one unit of the current grain (Agenda steps by its week count). A month that starts on this week steps by its week count; otherwise arrows move one month. The view pill switches among visible presets.\n\n\
 Display\n\
 Settings → Global: font, app font size, event font size, date/time format, week start, dim past days, and shade weekends. App font size covers the shell and calendar labels. Event font size covers event titles and times on the calendar. Settings → Calendar display toggles day-popup fields.\n\n\
 Calendars\n\
 Sidebar checkboxes toggle visibility without refetching. On editable calendars, Default picks the one calendar new events are created on. Manage feeds under Settings → Calendars.\n\n\
 Events\n\
-Day and Week: tap an empty hour to create an event, or tap the all-day row for an all-day event. Month, Year, and Agenda: tap a day for the day modal. Customize stores color, icon, and custom fields locally.\n\n\
+Day and Week: tap an empty hour to create an event, or tap the all-day row for an all-day event. Month: tap an event for its details, or the day (or “+N more”) for the day modal. Year and Agenda: tap a day for the day modal. Customize stores color, icon, and custom fields locally.\n\n\
 About\n\
 What Wijitify is, and the public GitHub repository for source, issues, and releases.\n\n\
 Wijitify\n\
@@ -279,6 +280,17 @@ impl AppCtx {
             tokio::time::sleep(Duration::from_millis(300)).await;
             if let Err(e) = store.save(&path) {
                 tracing::warn!("overrides save failed: {e:#}");
+            }
+        });
+    }
+
+    fn schedule_local_events_save(&mut self) {
+        let Some((path, events)) = self.local_events.take_save_snapshot() else {
+            return;
+        };
+        self.runtime.handle.spawn(async move {
+            if let Err(e) = LocalEventStore::write_events(&path, &events) {
+                tracing::warn!("local_events save failed: {e:#}");
             }
         });
     }
@@ -525,13 +537,8 @@ fn bind_settings(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
             {
                 let mut c = ctx.borrow_mut();
                 let theme = ThemeMode::from_i32(mode);
-                c.config.theme = theme;
-                c.config.palette = ThemePalette::for_mode(theme);
-                c.config.accent = c.config.palette.accent.clone();
-                c.theme_banner = format!(
-                    "{} theme loaded — component colors reset to defaults.",
-                    theme.label()
-                );
+                c.config.set_theme_mode(theme);
+                c.theme_banner = format!("{} theme loaded.", theme.label());
                 c.theme_banner_kind = 1;
                 let cfg_ref = c.config.clone();
                 if let Some(ui) = ui_weak.upgrade() {
@@ -559,6 +566,7 @@ fn bind_settings(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                 if *key == "accent" {
                     c.config.accent = normalized.clone();
                 }
+                c.config.remember_active_palette();
                 c.schedule_config_save();
                 if let Some(ui) = ui_weak.upgrade() {
                     apply_theme(&ui, &c.config);
@@ -580,8 +588,7 @@ fn bind_settings(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
             {
                 let mut c = ctx.borrow_mut();
                 let theme = c.config.theme;
-                c.config.palette = ThemePalette::for_mode(theme);
-                c.config.accent = c.config.palette.accent.clone();
+                c.config.set_active_palette(ThemePalette::for_mode(theme));
                 c.theme_banner = format!(
                     "{} defaults restored — component colors reset.",
                     theme.label()
@@ -597,6 +604,41 @@ fn bind_settings(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                 apply_settings(&ui, &ctx.borrow());
             }
             log_cb("settings_reset_theme_colors", t0);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let ctx = ctx.clone();
+        ui.on_settings_randomize_theme(move || {
+            let t0 = Instant::now();
+            {
+                let mut c = ctx.borrow_mut();
+                let theme = c.config.theme;
+                let coherence = c.config.theme_random_coherence;
+                c.config
+                    .set_active_palette(theme_random::random_palette(theme, coherence));
+                c.theme_banner = format!("{} theme randomized.", theme.label());
+                c.theme_banner_kind = 1;
+                let cfg_ref = c.config.clone();
+                if let Some(ui) = ui_weak.upgrade() {
+                    apply_theme(&ui, &cfg_ref);
+                }
+                c.schedule_config_save();
+            }
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_settings(&ui, &ctx.borrow());
+            }
+            log_cb("settings_randomize_theme", t0);
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        ui.on_settings_set_theme_random_coherence(move |v| {
+            let t0 = Instant::now();
+            let mut c = ctx.borrow_mut();
+            c.config.theme_random_coherence = v.clamp(0, 100) as u8;
+            c.schedule_config_save();
+            log_cb("settings_set_theme_random_coherence", t0);
         });
     }
     {
@@ -698,43 +740,23 @@ fn bind_settings(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                     c.settings_new_feed_url = ui.get_settings_new_feed_url().to_string();
                     c.settings_new_feed_color = ui.get_settings_new_feed_color().to_string();
                 }
-                let name = c.settings_new_feed_name.trim().to_string();
-                let url = c.settings_new_feed_url.trim().to_string();
-                if url.is_empty() {
-                    c.settings_feed_banner = "Enter an ICS URL.".into();
-                    c.settings_feed_banner_kind = 3;
-                } else {
-                    match zalender::normalize_ics_url(&url) {
-                        Ok(url) => {
-                            let mut z = c.config.zalender();
-                            let id = z.alloc_feed_id();
-                            let name = if name.is_empty() {
-                                "Calendar".into()
-                            } else {
-                                name
-                            };
-                            z.feeds.push(FeedConfig {
-                                id,
-                                name,
-                                url,
-                                color: c.settings_new_feed_color.clone(),
-                                visible: true,
-                                writable: false,
-                                local: false,
-                            });
-                            c.config.set_zalender(z);
-                            c.settings_new_feed_name.clear();
-                            c.settings_new_feed_url.clear();
-                            c.settings_new_feed_color = "#3b82f6".into();
-                            c.settings_feed_banner.clear();
-                            c.settings_feed_banner_kind = 0;
-                            c.schedule_config_save();
-                        }
-                        Err(_) => {
-                            c.settings_feed_banner =
-                                "URL must start with http:// or https://.".into();
-                            c.settings_feed_banner_kind = 3;
-                        }
+                let name = c.settings_new_feed_name.clone();
+                let url = c.settings_new_feed_url.clone();
+                let color = c.settings_new_feed_color.clone();
+                let mut z = c.config.zalender();
+                match setup::add_ics_feed(&mut z, &name, &url, &color) {
+                    Ok(_) => {
+                        c.config.set_zalender(z);
+                        c.settings_new_feed_name.clear();
+                        c.settings_new_feed_url.clear();
+                        c.settings_new_feed_color = "#3b82f6".into();
+                        c.settings_feed_banner.clear();
+                        c.settings_feed_banner_kind = 0;
+                        c.schedule_config_save();
+                    }
+                    Err(msg) => {
+                        c.settings_feed_banner = msg;
+                        c.settings_feed_banner_kind = 3;
                     }
                 }
             }
@@ -1616,30 +1638,6 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
     {
         let ui_weak = ui.as_weak();
         let ctx = ctx.clone();
-        ui.on_zal_zoom_out(move || {
-            let t0 = Instant::now();
-            {
-                let mut c = ctx.borrow_mut();
-                c.view_unit = c.view_unit.zoom_out();
-                c.view_count = 1;
-                let z = c.config.zalender();
-                if let Some(p) = z
-                    .presets
-                    .iter()
-                    .find(|p| p.visible && p.unit == c.view_unit && p.count == 1)
-                {
-                    c.active_preset_id = p.id.clone();
-                }
-            }
-            if let Some(ui) = ui_weak.upgrade() {
-                apply_zalender(&ui, &ctx.borrow());
-            }
-            log_cb("zal_zoom_out", t0);
-        });
-    }
-    {
-        let ui_weak = ui.as_weak();
-        let ctx = ctx.clone();
         ui.on_zal_go_today(move || {
             let t0 = Instant::now();
             {
@@ -1734,7 +1732,11 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
             if let Ok(d) = NaiveDate::parse_from_str(&key, "%Y-%m-%d") {
                 let mut c = ctx.borrow_mut();
                 c.selected_day = d;
-                c.anchor = d;
+                // Month stays on the month already showing. A leading or trailing
+                // day still gets the draft; it must not retarget the grid.
+                if c.view_unit != ViewUnit::Month {
+                    c.anchor = d;
+                }
                 c.event_detail_open = false;
                 c.day_modal_open = false;
                 open_create_event_draft(&mut c, d, start_mins.max(0), all_day);
@@ -2014,16 +2016,12 @@ fn bind_zalender(ui: &AppWindow, ctx: &std::rc::Rc<std::cell::RefCell<AppCtx>>) 
                         ev.rrule = Some(recur::rrule_from_draft(day, &repeat_draft(&c), tz));
                     }
                     c.local_events.add(ev);
-                    if let Err(e) = c.local_events.save_if_dirty() {
-                        c.status = format!("Could not save event: {e:#}");
-                        c.status_kind = 3;
-                    } else {
-                        merge_local_into_snapshot(&mut c);
-                        c.create_event_open = false;
-                        c.create_repeat_open = false;
-                        c.status = "Event created.".into();
-                        c.status_kind = 1;
-                    }
+                    c.schedule_local_events_save();
+                    merge_local_into_snapshot(&mut c);
+                    c.create_event_open = false;
+                    c.create_repeat_open = false;
+                    c.status = "Event created.".into();
+                    c.status_kind = 1;
                 }
             }
             if let Some(ui) = ui_weak.upgrade() {
@@ -2371,6 +2369,14 @@ fn current_detail_event(c: &AppCtx) -> Option<&zal_model::CalEvent> {
     let snap = c.snapshot.as_ref()?;
     let visible = visible_feed_ids(&c.config.zalender());
     if let Some(uid) = c.detail_uid.as_ref() {
+        // Recurring series share a uid. Prefer the occurrence on the day that was tapped.
+        let on_day = snap
+            .events_on(c.selected_day)
+            .into_iter()
+            .find(|e| e.uid == *uid && visible.contains(&e.feed_id));
+        if on_day.is_some() {
+            return on_day;
+        }
         return snap
             .events
             .iter()
@@ -2887,6 +2893,7 @@ fn apply_settings(ui: &AppWindow, c: &AppCtx) {
     ui.set_theme_is_dark(c.config.theme.is_dark());
     ui.set_theme_banner(SharedString::from(c.theme_banner.as_str()));
     ui.set_theme_banner_kind(c.theme_banner_kind);
+    ui.set_theme_random_coherence(i32::from(c.config.theme_random_coherence));
 
     let theme_colors: Vec<ThemeColorRow> = ThemePalette::labels()
         .iter()
@@ -3284,8 +3291,17 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
 
     let side = c.anchor;
     ui.set_zal_side_title(SharedString::from(side.format("%B %Y").to_string()));
+    let mini_events = empty_event_rows();
     let side_days = build_month_cells(
-        side, today, week_start, c, &z, &visible, None, false, &[true; 7], 6,
+        side,
+        today,
+        week_start,
+        c,
+        &z,
+        &visible,
+        &[true; 7],
+        6,
+        &mini_events,
     );
     ui.set_zal_side_days(ModelRc::new(VecModel::from(side_days)));
 
@@ -3339,9 +3355,13 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
     ui.set_zal_shade_weekends(z.display.shade_weekends);
 
     ui.set_zal_day_modal_open(c.day_modal_open);
-    ui.set_zal_day_modal_title(SharedString::from(
-        c.selected_day.format("%A, %B %e %Y").to_string(),
-    ));
+    ui.set_zal_day_modal_title(SharedString::from(format!(
+        "{}, {} {} {}",
+        c.selected_day.format("%a"),
+        c.selected_day.format("%b"),
+        c.selected_day.day(),
+        c.selected_day.format("%Y"),
+    )));
     ui.set_zal_selected_date_key(SharedString::from(
         c.selected_day.format("%Y-%m-%d").to_string(),
     ));
@@ -3429,6 +3449,18 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
     let detail = detail_event_row(c, &visible, &z);
     ui.set_zal_detail_event(detail.0);
     ui.set_zal_detail_custom_summary(SharedString::from(detail.1));
+    let detail_date = current_detail_event(c)
+        .map(zal_model::detail_date_label)
+        .unwrap_or_default();
+    ui.set_zal_detail_date(SharedString::from(detail_date));
+    let guests = current_detail_event(c)
+        .map(detail_guest_rows)
+        .unwrap_or_default();
+    let guest_row1: Vec<GuestRow> = guests.iter().take(5).cloned().collect();
+    let guest_row2: Vec<GuestRow> = guests.iter().skip(5).take(5).cloned().collect();
+    ui.set_zal_detail_guests(ModelRc::new(VecModel::from(guests)));
+    ui.set_zal_detail_guest_row1(ModelRc::new(VecModel::from(guest_row1)));
+    ui.set_zal_detail_guest_row2(ModelRc::new(VecModel::from(guest_row2)));
 
     ui.set_zal_customize_open(c.customize_open);
     ui.set_zal_customize_color(color::parse_hex(if c.customize_color.is_empty() {
@@ -3471,6 +3503,11 @@ fn apply_zalender(ui: &AppWindow, c: &AppCtx) {
     ui.set_zal_edit_placeholder_open(c.edit_placeholder_open);
 }
 
+fn empty_event_rows() -> ModelRc<EventRow> {
+    ModelRc::new(VecModel::from(Vec::<EventRow>::new()))
+}
+
+/// Sidebar and year mini-months. Dots and day numbers only — no chip rows.
 #[allow(clippy::too_many_arguments)]
 fn build_month_cells(
     month: NaiveDate,
@@ -3479,29 +3516,55 @@ fn build_month_cells(
     c: &AppCtx,
     z: &ZalenderConfig,
     visible: &std::collections::HashSet<String>,
-    slots: Option<(i32, i32)>,
-    // Prefix other-month day labels with a 3-letter month abbr (main month grid only).
-    other_month_abbr: bool,
     show_days: &[bool; 7],
     rows: usize,
+    events: &ModelRc<EventRow>,
 ) -> Vec<DayCell> {
     let grid = zal_view::month_grid(month.year(), month.month(), today, week_start);
     let cols = zal_view::shown_week_columns(week_start, show_days);
     let rows = rows.clamp(1, 6);
     let mut cells = Vec::with_capacity(rows * cols.len());
+    // Year dots are Theme.muted; this color is unused there. One value, no per-day parse.
+    let event_color = slint::Color::from_rgb_u8(0x3b, 0x82, 0xf6);
+    let week_num = zal_view::week_start_num(z.week_start);
+    let selected_week = if c.view_unit == ViewUnit::Week {
+        Some(zal_model::start_of_week(c.selected_day, week_num))
+    } else {
+        None
+    };
     for row in 0..rows {
         for &col in &cols {
             let (d, in_month, is_today) = grid[row * 7 + col];
-            cells.push(cell_for_day(
-                d,
+            let has_events = c
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| s.has_visible_event(d, visible));
+            let wd = d.weekday().num_days_from_sunday();
+            cells.push(DayCell {
+                day: d.day() as i32,
                 in_month,
                 is_today,
-                c,
-                z,
-                visible,
-                slots,
-                other_month_abbr,
-            ));
+                is_past: d < today,
+                is_weekend: wd == 0 || wd == 6,
+                has_events,
+                // MiniMonth draws the dot from has_events and never reads the count.
+                event_count: 0,
+                all_day_count: 0,
+                is_selected: d == c.selected_day,
+                in_selected_week: selected_week
+                    .is_some_and(|sel| zal_model::start_of_week(d, week_num) == sel),
+                label: SharedString::from(d.day().to_string()),
+                event_color,
+                // format! skips chrono's format-string parser (one call per day in the year).
+                date_key: SharedString::from(format!(
+                    "{:04}-{:02}-{:02}",
+                    d.year(),
+                    d.month(),
+                    d.day()
+                )),
+                events: events.clone(),
+                max_lane: -1,
+            });
         }
     }
     cells
@@ -3568,6 +3631,7 @@ fn cell_for_day(
         event_color,
         date_key: SharedString::from(d.format("%Y-%m-%d").to_string()),
         events: ModelRc::new(VecModel::from(events)),
+        max_lane: -1,
     }
 }
 
@@ -3643,13 +3707,25 @@ fn build_main_days(
             ));
         }
         ViewUnit::Year => {
+            // One shared empty model: a year is 12 grids and none of them draw chips.
+            let mini_events = empty_event_rows();
+            cells.reserve(c.view_count as usize * 12 * 6 * 7);
+            titles.reserve(c.view_count as usize * 12);
             for y in 0..c.view_count {
                 let year = c.anchor.year() + y as i32;
                 for month in 1..=12 {
                     let first = NaiveDate::from_ymd_opt(year, month, 1).unwrap_or(today);
                     titles.push(first.format("%b %Y").to_string());
                     cells.extend(build_month_cells(
-                        first, today, week_start, c, z, visible, None, false, show_days, 6,
+                        first,
+                        today,
+                        week_start,
+                        c,
+                        z,
+                        visible,
+                        show_days,
+                        6,
+                        &mini_events,
                     ));
                 }
             }
@@ -3672,7 +3748,134 @@ fn build_main_days(
             }
         }
     }
+    apply_event_spans(&mut cells, c, week_start, show_days);
     (cells, titles)
+}
+
+/// Stretch multi-day all-day events across the columns of each day strip.
+fn apply_event_spans(
+    cells: &mut [DayCell],
+    c: &AppCtx,
+    week_start: WeekStart,
+    show_days: &[bool; 7],
+) {
+    let (cols, pack_timed) = match c.view_unit {
+        ViewUnit::Day | ViewUnit::Week => (cells.len(), false),
+        ViewUnit::Month => (
+            zal_view::shown_week_columns(week_start, show_days).len(),
+            true,
+        ),
+        _ => return,
+    };
+    if cols == 0 || cells.is_empty() {
+        return;
+    }
+    let bounds = all_day_bounds(c.snapshot.as_ref());
+    for strip in cells.chunks_mut(cols) {
+        let mut columns = Vec::with_capacity(strip.len());
+        let mut days = Vec::with_capacity(strip.len());
+        let mut extracted = Vec::with_capacity(strip.len());
+        for cell in strip.iter() {
+            let rows = (0..cell.events.row_count())
+                .filter_map(|i| cell.events.row_data(i))
+                .collect::<Vec<_>>();
+            let day = day_index(cell.date_key.as_str());
+            days.push(day);
+            columns.push(
+                rows.iter()
+                    .map(|row| {
+                        let key = span_key(row);
+                        let (start, end) = if row.all_day {
+                            bounds.get(&key).copied().unwrap_or((day, day))
+                        } else {
+                            (day, day)
+                        };
+                        zal_view::StripInput {
+                            key,
+                            all_day: row.all_day,
+                            start,
+                            end,
+                            sort: row.start_mins,
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            extracted.push(rows);
+        }
+        let placed = zal_view::place_strip(&columns, &days, pack_timed);
+        let all_day_lanes = placed
+            .iter()
+            .zip(&extracted)
+            .flat_map(|(places, rows)| {
+                places
+                    .iter()
+                    .zip(rows)
+                    .filter_map(|(place, row)| row.all_day.then_some(place.lane + 1))
+            })
+            .max()
+            .unwrap_or(0);
+        for (cell, (rows, places)) in strip.iter_mut().zip(extracted.into_iter().zip(placed)) {
+            let mut max_lane = -1i32;
+            let mut out = Vec::with_capacity(rows.len());
+            for (mut row, place) in rows.into_iter().zip(places) {
+                if pack_timed || row.all_day {
+                    max_lane = max_lane.max(place.lane);
+                }
+                row.span_cols = place.span_cols;
+                row.span_lane = place.lane;
+                row.cont_left = place.cont_left;
+                row.cont_right = place.cont_right;
+                row.prev_lane = place.prev_lane;
+                row.lane_order = place.lane_order;
+                out.push(row);
+            }
+            cell.events = ModelRc::new(VecModel::from(out));
+            cell.max_lane = max_lane;
+            if !pack_timed {
+                cell.all_day_count = all_day_lanes;
+            }
+        }
+    }
+}
+
+fn span_key(row: &EventRow) -> zal_view::EventKey {
+    zal_view::EventKey {
+        uid: row.uid.to_string(),
+        recurrence_id: row.recurrence_id.to_string(),
+        feed_id: row.feed_id.to_string(),
+    }
+}
+
+fn day_index(key: &str) -> i64 {
+    NaiveDate::parse_from_str(key, "%Y-%m-%d")
+        .map(|d| i64::from(d.num_days_from_ce()))
+        .unwrap_or(0)
+}
+
+fn all_day_bounds(snap: Option<&CalendarSnapshot>) -> HashMap<zal_view::EventKey, (i64, i64)> {
+    let Some(snap) = snap else {
+        return HashMap::new();
+    };
+    let mut map = HashMap::new();
+    for ev in &snap.events {
+        if !ev.all_day {
+            continue;
+        }
+        let start = ev.start.date_naive();
+        let end = zal_model::occupied_end(ev);
+        map.insert(
+            zal_view::EventKey {
+                uid: ev.uid.clone(),
+                recurrence_id: ev.recurrence_id.clone().unwrap_or_default(),
+                feed_id: ev.feed_id.clone(),
+            },
+            (
+                i64::from(start.num_days_from_ce()),
+                i64::from(end.num_days_from_ce()),
+            ),
+        );
+    }
+    map
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3918,6 +4121,12 @@ fn event_to_row(
         day_ord: 0,
         slot_ord: 0,
         slot_total: 0,
+        span_cols: 1,
+        span_lane: 0,
+        cont_left: false,
+        cont_right: false,
+        prev_lane: -1,
+        lane_order: 0,
     }
 }
 
@@ -3939,6 +4148,60 @@ fn mins_label(mins: i32) -> String {
     } else {
         format!("{h12}:{m:02} {suffix}")
     }
+}
+
+fn detail_time_label(ev: &zal_model::CalEvent) -> String {
+    if ev.all_day {
+        return "All day".into();
+    }
+    let start = ev.start.with_timezone(&Local);
+    let end = ev.end.with_timezone(&Local);
+    format!("{} - {}", clock_hm(&start), clock_hm(&end))
+}
+
+fn clock_hm(t: &chrono::DateTime<Local>) -> String {
+    let (pm, hour) = t.hour12();
+    format!("{hour}:{:02} {}", t.minute(), if pm { "PM" } else { "AM" })
+}
+
+fn detail_source_name(ev: &zal_model::CalEvent, z: &ZalenderConfig) -> String {
+    let named = z
+        .feeds
+        .iter()
+        .find(|f| f.id == ev.feed_id)
+        .map(|f| f.name.trim().to_string())
+        .filter(|n| !n.is_empty());
+    if let Some(name) = named {
+        return name;
+    }
+    let stored = ev.feed_name.trim();
+    if stored.is_empty() {
+        "Calendar".into()
+    } else {
+        stored.into()
+    }
+}
+
+fn detail_guest_rows(ev: &zal_model::CalEvent) -> Vec<GuestRow> {
+    let mut rows = Vec::new();
+    let organizer = ev.organizer.trim();
+    if !organizer.is_empty() {
+        rows.push(GuestRow {
+            name: SharedString::from(organizer),
+            organizer: true,
+        });
+    }
+    for name in &ev.attendees {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        rows.push(GuestRow {
+            name: SharedString::from(name),
+            organizer: false,
+        });
+    }
+    rows
 }
 
 fn detail_event_row(
@@ -3965,11 +4228,20 @@ fn detail_event_row(
         day_ord: 0,
         slot_ord: 0,
         slot_total: 0,
+        span_cols: 1,
+        span_lane: 0,
+        cont_left: false,
+        cont_right: false,
+        prev_lane: -1,
+        lane_order: 0,
     };
     let Some(ev) = current_detail_event(c) else {
         return (empty, String::new());
     };
-    let row = event_to_row(ev, c.selected_day, c, z, &z.day_modal);
+    let mut row = event_to_row(ev, c.selected_day, c, z, &z.day_modal);
+    row.title = SharedString::from(ev.title.as_str());
+    row.time = SharedString::from(detail_time_label(ev));
+    row.calendar = SharedString::from(detail_source_name(ev, z));
     let resolved = c.overrides.resolve(ev);
     let summary = if resolved.fields.is_empty() {
         String::new()
@@ -3989,10 +4261,20 @@ fn detail_event_row(
     (row, summary)
 }
 
-fn tick_clock_now(ui: &AppWindow, c: &AppCtx) {
+fn tick_clock_now(ui: &AppWindow, _c: &AppCtx) {
     let now = Local::now();
-    let pattern = c.config.datetime_format.chrono_pattern();
-    ui.set_clock_text(SharedString::from(now.format(pattern).to_string()));
+    let (pm, hour) = now.hour12();
+    ui.set_clock_date(SharedString::from(format!(
+        "{}/{}/{}",
+        now.month(),
+        now.day(),
+        now.year()
+    )));
+    ui.set_clock_time(SharedString::from(format!(
+        "{hour:02}:{:02} {}",
+        now.minute(),
+        if pm { "PM" } else { "AM" }
+    )));
     ui.set_zal_now_mins((now.hour() * 60 + now.minute()) as i32);
 }
 

@@ -2,7 +2,7 @@ import { Theme } from "../theme.slint";
 import { Icons, FaIcon } from "../icons.slint";
 import {
     Button, IconButton, InfoTip, Row, Banner, Switch, Dropdown, Field, LongField,
-    SettingRow, SettingsDivider, ShortInput, ColorBox
+    SettingRow, SettingsDivider, ShortInput, ColorBox, PercentSlider
 } from "./kit.slint";
 
 export struct ModuleToggleRow {
@@ -83,6 +83,33 @@ component PresetCol inherits HorizontalLayout {
     alignment: center;
     cross-axis-alignment: center;
     @children
+}
+
+/// Reset and Delete share this column. Width follows the Delete label so the pill is not clipped.
+component PresetActionCol inherits Rectangle {
+    // Same font as Button. preferred-width stays valid at width 0.
+    action-measure := Text {
+        text: "Delete";
+        font-family: Theme.font-family;
+        font-size: Theme.font-body;
+        font-weight: 600;
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        accessible-role: none;
+    }
+    // Button chrome: 8px padding + 32px pill inset, plus a little slack so subpixels don't clip.
+    property <length> action-width: action-measure.preferred-width + 48px;
+    min-width: action-width;
+    max-width: action-width;
+    preferred-width: action-width;
+
+    HorizontalLayout {
+        width: parent.width;
+        alignment: center;
+        cross-axis-alignment: center;
+        @children
+    }
 }
 
 /// Summary row. The whole row opens the edit modal.
@@ -327,6 +354,8 @@ export component SettingsOverlay inherits Rectangle {
     in property <[ThemeColorRow]> theme-colors;
     in property <string> theme-banner: "";
     in property <int> theme-banner-kind: 0;
+    /// 100 = harmonized randomize; 0 = fully wild colors.
+    in-out property <int> theme-random-coherence: 100;
 
     in property <[SettingsFeedRow]> feeds;
     in-out property <string> new-feed-name: "";
@@ -399,6 +428,9 @@ export component SettingsOverlay inherits Rectangle {
     callback set-theme-color(int, string);
     /// Restore standard Light/Dark palette for the current theme mode.
     callback reset-theme-colors();
+    /// Chromatic random palette for the current Dark/Light mode.
+    callback randomize-theme();
+    callback set-theme-random-coherence(int);
     callback toggle-feed-visible(int);
     callback remove-feed(int);
     callback add-feed();
@@ -806,7 +838,7 @@ export component SettingsOverlay inherits Rectangle {
                             Dropdown {
                                 inline: true;
                                 caption: "Date and time format";
-                                tip: "Format for the clock under the sidebar month title. Does not change how event times are stored.";
+                                tip: "The sidebar clock above the calendar shows the date as m/d/yyyy and the time as hh:mm AM/PM. Does not change how event times are stored.";
                                 options: root.datetime-options;
                                 selected: root.datetime-format;
                                 changed(i) => { root.set-datetime-format(i); }
@@ -859,7 +891,7 @@ export component SettingsOverlay inherits Rectangle {
                             SettingsDivider {}
                             SettingRow {
                                 label: "Theme";
-                                tip: "Choosing Dark or Light loads that theme’s default colors below. You can then tweak each component color individually.";
+                                tip: "Switches between Dark and Light and restores the last colors you used for that mode. Reset to default clears only the mode currently selected.";
                                 HorizontalLayout {
                                     spacing: Theme.pad-sm;
                                     alignment: end;
@@ -872,6 +904,34 @@ export component SettingsOverlay inherits Rectangle {
                                         label: "Dark";
                                         role: root.theme-is-dark ? "primary" : "secondary";
                                         activate => { root.set-theme(1); }
+                                    }
+                                }
+                            }
+                            SettingsDivider {}
+                            SettingRow {
+                                label: "Randomize";
+                                tip: "Builds new component colors for the selected theme. At 100% they stay harmonized (Dark stays dark, Light stays light). Slide toward 0% for freer, fully independent colors.";
+                                HorizontalLayout {
+                                    spacing: Theme.pad-sm;
+                                    alignment: end;
+                                    cross-axis-alignment: center;
+                                    Text {
+                                        font-family: Theme.font-family;
+                                        text: root.theme-random-coherence + "%";
+                                        color: Theme.muted;
+                                        font-size: Theme.font-caption;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: right;
+                                        min-width: 36px;
+                                    }
+                                    PercentSlider {
+                                        value <=> root.theme-random-coherence;
+                                        changed(v) => { root.set-theme-random-coherence(v); }
+                                    }
+                                    Button {
+                                        label: "Randomize";
+                                        role: "secondary";
+                                        activate => { root.randomize-theme(); }
                                     }
                                 }
                             }
@@ -966,11 +1026,7 @@ export component SettingsOverlay inherits Rectangle {
                                     preferred-width: 72px;
                                     max-width: 72px;
                                 }
-                                Rectangle {
-                                    min-width: 96px;
-                                    preferred-width: 96px;
-                                    max-width: 96px;
-                                }
+                                PresetActionCol { }
                             }
 
                             for p[i] in presets: HorizontalLayout {
@@ -1036,22 +1092,18 @@ export component SettingsOverlay inherits Rectangle {
                                     max-width: 72px;
                                     activate => { root.open-preset-edit(i); }
                                 }
-                                // Same width for Reset / Delete so columns stay aligned with or without customs.
-                                if p.builtin: Button {
-                                    label: "Reset";
-                                    role: "secondary";
-                                    min-width: 96px;
-                                    preferred-width: 96px;
-                                    max-width: 96px;
-                                    activate => { root.reset-preset(i); }
-                                }
-                                if !p.builtin: Button {
-                                    label: "Delete";
-                                    role: "danger";
-                                    min-width: 96px;
-                                    preferred-width: 96px;
-                                    max-width: 96px;
-                                    activate => { root.remove-preset(i); }
+                                // One column for Reset and Delete; each pill is centered in it.
+                                PresetActionCol {
+                                    if p.builtin: Button {
+                                        label: "Reset";
+                                        role: "secondary";
+                                        activate => { root.reset-preset(i); }
+                                    }
+                                    if !p.builtin: Button {
+                                        label: "Delete";
+                                        role: "danger";
+                                        activate => { root.remove-preset(i); }
+                                    }
                                 }
                             }
                         }
@@ -1077,7 +1129,7 @@ export component SettingsOverlay inherits Rectangle {
                         spacing: Theme.pad-sm;
                         Text {
                             font-family: Theme.font-family;
-                            text: "Fields shown when you open a day or event from the calendar.";
+                            text: "Day list fields. Event cards always show the title, date, time, and source.";
                             color: Theme.muted;
                             font-size: Theme.font-caption;
                             wrap: word-wrap;
@@ -1088,7 +1140,7 @@ export component SettingsOverlay inherits Rectangle {
                             width: 100%;
                             SettingRow {
                                 label: "Show time";
-                                tip: "Show event start/end time in the day modal and event detail. Off hides times for a cleaner list.";
+                                tip: "Show start and end times on events in the day list.";
                                 Switch {
                                     checked: root.modal-show-time;
                                     toggled => { root.set-modal-show-time(self.checked); }
@@ -1106,7 +1158,7 @@ export component SettingsOverlay inherits Rectangle {
                             SettingsDivider {}
                             SettingRow {
                                 label: "Show calendar name";
-                                tip: "Show which calendar feed an event belongs to in the day modal and detail sheet.";
+                                tip: "Show the calendar name on events in the day list. The event card always shows its source.";
                                 Switch {
                                     checked: root.modal-show-calendar;
                                     toggled => { root.set-modal-show-calendar(self.checked); }
@@ -1618,7 +1670,7 @@ export component SettingsOverlay inherits Rectangle {
                                 inline: true;
                                 compact: true;
                                 caption: "Title lines";
-                                tip: "How many lines an event title uses before it ends with …. 2 wraps once. The event box in the view grows to fit.";
+                                tip: "Most lines an event title may use. A shorter title stays that tall; past the limit the last line ends with ….";
                                 options: root.title-line-options;
                                 selected: root.preset-title-lines - 1;
                                 changed(i) => { root.set-preset-title-lines(i + 1); }

@@ -6,14 +6,12 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::services::config::LOCAL_FEED_ID;
 use crate::services::storage::{self, write_atomic};
 
 use super::model::CalEvent;
 
 pub const SCHEMA: u32 = 1;
-pub const LOCAL_FEED_ID: &str = "feed-local";
-#[allow(dead_code)]
-pub const LOCAL_FEED_URL: &str = "local://";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LocalEventsFile {
@@ -70,18 +68,23 @@ impl LocalEventStore {
         self.dirty = true;
     }
 
-    pub fn save_if_dirty(&mut self) -> Result<()> {
+    /// Clear dirty and return a snapshot for a background write. Call from the UI
+    /// thread; write with [`write_events`] on Tokio.
+    pub fn take_save_snapshot(&mut self) -> Option<(PathBuf, Vec<CalEvent>)> {
         if !self.dirty {
-            return Ok(());
+            return None;
         }
+        self.dirty = false;
+        Some((self.path.clone(), self.events.clone()))
+    }
+
+    pub fn write_events(path: &Path, events: &[CalEvent]) -> Result<()> {
         let file = LocalEventsFile {
             schema_version: SCHEMA,
-            events: self.events.clone(),
+            events: events.to_vec(),
         };
         let bytes = serde_json::to_vec_pretty(&file)?;
-        write_atomic(&self.path, &bytes)?;
-        self.dirty = false;
-        Ok(())
+        write_atomic(path, &bytes)
     }
 }
 
@@ -112,6 +115,8 @@ pub fn new_local_event(
         color: color.into(),
         description: String::new(),
         location: String::new(),
+        organizer: String::new(),
+        attendees: Vec::new(),
         rrule: None,
     }
 }
